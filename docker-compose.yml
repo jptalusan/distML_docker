@@ -1,0 +1,68 @@
+version: "2.2"
+services:
+  worker_000:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0000
+    depends_on: 
+      - broker
+    env_file: 
+      - hosts.env
+    # cpu_percent: 20
+    # cpus: 0.5
+
+  worker_001:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0001
+    depends_on: 
+      - broker
+    env_file: 
+      - hosts.env
+  
+  worker_002:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0002
+    env_file: 
+      - hosts.env
+    depends_on: 
+      - broker
+
+  broker:
+    build: ./broker/
+    ports:
+      - "7000:7000"
+    expose:
+      - "6000"
+    volumes:
+      - ./broker:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+    env_file: 
+      - hosts.env
+
+  influxdb:
+    image: influxdb:1.7.3-alpine
+    volumes:
+      - ./data/influxdb:/var/lib/influxdb
+    ports:
+      - "8086:8086"
+    environment: 
+      - PYTHONBUFFERED=1
+    logging:
+      driver: none
+      
+# networks:
+#   internal_network:
+#     driver: overlay
+#     internal: true

@@ -1,0 +1,8 @@
+pyzmq
+influxdb
+blosc
+pandas
+numpy
+scipy
+spectrum
+tornado
