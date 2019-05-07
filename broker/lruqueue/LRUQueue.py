@@ -7,24 +7,36 @@ from .taskcreator import TaskCreator
 from multiprocessing import Process, Queue
 import queue
 
+# https://github.com/zeromq/pyzmq/issues/1091
+
 current_milli_time = lambda: int(round(time.time() * 1000))
 
 class LRUQueue(object):
     """LRUQueue class using ZMQStream/IOLoop for event dispatching"""
 
-    def __init__(self, backend_socket, frontend_socket):
+    def __init__(self, backend_socket, frontend_socket, heartbeat_socket):
         self.available_workers = 0
+        self.unique_workers = []
         self.workers = []
         self.task_queue = []
+        self.task_count = 0
+        self.worker_stat = {}
+
         self.client_nbr = NBR_CLIENTS
 
         self.backend = ZMQStream(backend_socket)
         self.frontend = ZMQStream(frontend_socket)
+        self.heartbeat = ZMQStream(heartbeat_socket)
+
         self.backend.on_recv(self.handle_backend)
+        self.heartbeat.on_recv(self.handle_heartbeat)
 
         self.loop = IOLoop.instance()
         self.mpq = Queue()
 
+    def handle_heartbeat(self, msg):
+        pass
+        
     def handle_backend(self, msg):
         # Queue worker address for LRU routing
         worker_addr, empty, client_addr = msg[:3]
@@ -34,7 +46,9 @@ class LRUQueue(object):
         # add worker back to the list of workers
         self.available_workers += 1
         print('Added to available workers (new total): ', self.available_workers)
-        self.workers.append(worker_addr)
+        # self.workers.append(worker_addr)
+        self.workers.insert(0, worker_addr)
+        self.unique_workers.append(worker_addr)
 
         #   Second frame is empty
         assert empty == b""
@@ -46,7 +60,8 @@ class LRUQueue(object):
         # If client reply, send rest back to frontend
         if client_addr != b"READY":
             empty, reply = msg[3:]
-
+            
+            print("some reply: {}".format(reply.decode('utf-8')))
             # Following frame is empty
             assert empty == b""
 
@@ -54,53 +69,74 @@ class LRUQueue(object):
                 worker_addr.decode("utf-8"), 
                 client_addr.decode("utf-8")))
 
-            # Receive something from backend and if the same length as the task queue
-            # Aggregate and then send a response to the client
-            # 
-            self.frontend.send_multipart([client_addr, b'', reply])
+            print("Checking task list which has {} tasks left".format(len(self.task_queue)))
+            # Check if still some task is available
+            if self.task_queue:
+                task = self.task_queue.pop()
+                print("Number of workers: {}".format(len(self.workers)))
+                worker_id = self.workers.pop()
+                self.available_workers -= 1
+                print("Sending to {}".format(worker_id))
+                if worker_id.decode('utf-8') in self.worker_stat:
+                    self.worker_stat[worker_id.decode('utf-8')] = int(self.worker_stat[worker_id.decode('utf-8')]) + 1
+                else:
+                    self.worker_stat[worker_id.decode('utf-8')] = 1
+                print("Stat of worker:", self.worker_stat[worker_id.decode("utf-8")])
 
-            self.client_nbr -= 1
+                self.backend.send_multipart([worker_id,
+                                                b'',
+                                                client_addr,
+                                                b'',
+                                                task.encode('ascii')])
+                self.task_count += 1
+            else:
+                print("No more tasks available. Sent a total of {} tasks to {} unique workers".format(
+                    str(self.task_count), len(set(self.unique_workers))
+                ))
 
-            print('Client count: ', self.client_nbr)
-
-            # commented out because don't want to close broker immediately
-            # if self.client_nbr == 0:
-            #     # Exit after N messages
-            #     print('Exiting...')
-            #     self.loop.add_timeout(time.time() + 1, self.loop.stop)
+                print("stats:", self.worker_stat)
+                # Receive something from backend and if the same length as the task queue
+                # Aggregate and then send a response to the client
+                # Only reply when broker is done collecting?
+                self.frontend.send_multipart([client_addr, b'', reply])
 
         # Should change this? Or I should break down the data 
         # received on the frontend to multiple tasks for different workers.
         # a queue of tasks.
         if self.available_workers == 1:
             # on first recv, start accepting frontend messages
-            print("Accepting client messages now...")
-            try:
-                print("Status of queue: ", self.mpq.get(True, 0.1))
-            except queue.Empty:
-                print("No queue yet...")
-
             self.frontend.on_recv(self.handle_frontend)
             # If a worker is available, pop a task from the queue.
 
-    def process_task_queue(self, q, client_addr, task_list):
-        self.mpq.put('Task list len: ', len(task_list))
-        print("Process task queue started.")
-        while len(task_list) > 0:
-            for task in task_list:
-                print(task)
-                if self.available_workers > 0:
-                    worker_id = self.workers.pop()
-                    self.available_workers -= 1
+    def task_distribute_subprocess(self, client_addr):
+        # print("Enter: task_distribute_subprocess")
+        # print("Tasks to distribute: {}".format(len(self.task_queue)))
+        # print("Starting Workers: ", self.workers)
+        # print("Available workers: {}".format(self.available_workers))
+        # Can change which worker to send to here...
+        for _ in range(len(self.workers) - 1):
+            self.available_workers -= 1
+            task = self.task_queue.pop()
+            worker_id = self.workers.pop()
 
-                    self.backend.send_multipart([worker_id, 
-                                                b'', 
-                                                client_addr, 
-                                                b'', 
-                                                task.encode('ascii')])
-                    task_list.remove(task)
+            print("Sending to {}".format(worker_id))
+            if worker_id.decode('utf-8') in self.worker_stat:
+                self.worker_stat[worker_id.decode('utf-8')] = int(self.worker_stat[worker_id.decode('utf-8')]) + 1
+            else:
+                self.worker_stat[worker_id.decode('utf-8')] = 1
+            print("Stat of worker:", self.worker_stat[worker_id.decode("utf-8")])
+
+            print("Remaining Workers:", self.workers)
+            print("task {} for worker {}:".format(task, worker_id))
+            self.task_count += 1
+            self.backend.send_multipart([worker_id,
+                                b'',
+                                client_addr,
+                                b'',
+                                task.encode('ascii')])
 
     def handle_frontend(self, msg):
+        print("Entered handle_frontend()...")
         # Now get next client request, route to LRU worker
         # Client request is [address][empty][request]
         client_addr, empty, request = msg
@@ -112,36 +148,13 @@ class LRUQueue(object):
         
         print("Task Queue:", self.task_queue)
 
-        # p = Process(target=self.process_task_queue, args=(self.mpq, client_addr, task_queue, ))
+        # Attempting fix for below
+        # maybe create a separate process that checks how many workers are available
+        # And loops through them sending tasks (just a trigger)
+        # See comment above, when a new process is started, it will not work with the same sockets??
+        # p = Process(target=self.task_distribute_subprocess, args=(client_addr,))
         # p.start()
-
-        # if self.available_workers == 3:
-        #     for task in task_queue:
-        #         worker_id = self.workers.pop()
-        #         self.available_workers -= 1
-        #         self.backend.send_multipart([worker_id, 
-        #                                      b'', 
-        #                                      client_addr, 
-        #                                      b'', 
-        #                                      task.encode('ascii')])
-
-        # print("Request:", json.loads(broker_request))
-
-        #  Perform some algorithms here based on task creator
-        # request = "Hello".encode('ascii')
-        #  Or create the queue here? and send to multiple workers. We wait until
-        #  a worker is available and then we 
-        #  Dequeue and drop the next worker address
-        # self.available_workers -= 1
-        # worker_id = self.workers.pop()
-
-        # print('Worker count: ', self.available_workers)
-        # # self.backend.send_multipart([worker_id, b'', client_addr, b'', request])
-        # self.backend.send_multipart([worker_id, 
-        #                              b'', 
-        #                              client_addr, 
-        #                              b'', 
-        #                              task_queue.encode('ascii')])
+        self.task_distribute_subprocess(client_addr)
 
         if self.available_workers == 0:
             print('Stopping reception until workers are available.')

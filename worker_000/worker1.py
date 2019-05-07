@@ -46,7 +46,7 @@ def get_rows_from_db(label):
     df_client.switch_database(INFLUX_DB)
 
     query = "SELECT * FROM {} " \
-        "GROUP BY \"user\" LIMIT 50".format(quote_ident('acc'))
+        "GROUP BY \"user\" LIMIT 500".format(quote_ident('acc'))
 
     result = df_client.query(query)
     label_df = parse_groupby_dict(result)
@@ -64,7 +64,7 @@ def get_rows_from_db(label):
         print('label:', name)
         temp_df = group.drop(['exp', 'label', 'user'], axis=1)
         
-        print(temp_df.head())
+        # print(temp_df.head())
         tAcc_XYZ = temp_df.values
         all_Acc_features = feature_extraction_separate.compute_all_Acc_features(
             tAcc_XYZ, window, slide, fs)
@@ -107,14 +107,22 @@ def worker_thread(worker_url, i):
         while True:
 
             address, empty, request = socket.recv_multipart()
-
+            print("I received some task...")
             #  Before processing send a heartbeat
             broker_dict_task = parse_broker_message(request)
 
             print("Received in Worker %s: %s\n" % (socket.identity.decode('ascii'),
                                 request.decode('ascii')), end='')
 
-            socket.send_multipart([address, b'', b'OK'])
+            dict_rep = {}
+            dict_rep["mean"] = "Hello"
+            dict_rep["time"] = current_milli_time()
+            dict_rep = json.dumps(dict_rep)
+
+            #  Send reply back to client
+            # socket.send_json(dict_rep)
+            
+            socket.send_multipart([address, b'', dict_rep.encode('ascii')])
 
     except zmq.ContextTerminated:
         # context terminated so quit silently
