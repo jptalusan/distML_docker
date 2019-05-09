@@ -13,6 +13,7 @@ def main():
 
     url_worker = "tcp://*:{}".format(BACKEND_PORT)
     url_client = "tcp://*:{}".format(FRONTEND_PORT)
+    url_heartb = "tcp://*:{}".format('9999')
 
     print("Broker1 is started...")
 
@@ -22,9 +23,11 @@ def main():
     frontend.bind(url_client)
     backend = context.socket(zmq.ROUTER)
     backend.bind(url_worker)
+    heartbeat = context.socket(zmq.ROUTER)
+    heartbeat.bind(url_heartb)
 
     # create queue with the sockets
-    queue = LRUQueue(backend, frontend)
+    queue = LRUQueue(backend, frontend, heartbeat)
 
     # start reactor
     IOLoop.instance().start()

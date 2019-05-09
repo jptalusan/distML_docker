@@ -11,8 +11,8 @@ services:
       - broker
     env_file: 
       - hosts.env
-    cpu_percent: 10
-    cpus: 0.2
+    # cpu_percent: 10
+    # cpus: 0.2
 
   worker_001:
     build: ./worker_000/
@@ -42,6 +42,7 @@ services:
     build: ./broker/
     ports:
       - "7000:7000"
+      - "9999:9999"
     expose:
       - "6000"
     volumes:

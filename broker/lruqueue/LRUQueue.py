@@ -33,10 +33,29 @@ class LRUQueue(object):
 
         self.loop = IOLoop.instance()
         self.mpq = Queue()
-
-    def handle_heartbeat(self, msg):
-        pass
         
+        self.worker_status = {}
+
+    # TODO: need to handle heartbeats itself, if the time is not new
+    # for N seconds, remove it from the available worker list
+    # Just time probably.
+    def handle_heartbeat(self, msg):
+        # print("Received heartbeat: ", msg)
+        worker_id, _, _, status, last_beat = msg
+        curr_stat = {}
+        curr_stat['last_beat'] = last_beat
+        curr_stat['status'] = status
+        
+        self.worker_status[worker_id] = curr_stat
+
+        self.heartbeat.send_multipart([msg[0],
+                                b'',
+                                b"Pong..."])
+
+        print("Curr time is: {}".format(str(int(time.time()))))
+        print(self.worker_status)
+
+
     def handle_backend(self, msg):
         # Queue worker address for LRU routing
         worker_addr, empty, client_addr = msg[:3]
@@ -68,7 +87,6 @@ class LRUQueue(object):
             print("Received task, done by {}, to be sent to {}".format(
                 worker_addr.decode("utf-8"), 
                 client_addr.decode("utf-8")))
-
             print("Checking task list which has {} tasks left".format(len(self.task_queue)))
             # Check if still some task is available
             if self.task_queue:
@@ -108,12 +126,7 @@ class LRUQueue(object):
             self.frontend.on_recv(self.handle_frontend)
             # If a worker is available, pop a task from the queue.
 
-    def task_distribute_subprocess(self, client_addr):
-        # print("Enter: task_distribute_subprocess")
-        # print("Tasks to distribute: {}".format(len(self.task_queue)))
-        # print("Starting Workers: ", self.workers)
-        # print("Available workers: {}".format(self.available_workers))
-        # Can change which worker to send to here...
+    def distribute_tasks(self, client_addr):
         for _ in range(len(self.workers) - 1):
             self.available_workers -= 1
             task = self.task_queue.pop()
@@ -124,10 +137,6 @@ class LRUQueue(object):
                 self.worker_stat[worker_id.decode('utf-8')] = int(self.worker_stat[worker_id.decode('utf-8')]) + 1
             else:
                 self.worker_stat[worker_id.decode('utf-8')] = 1
-            print("Stat of worker:", self.worker_stat[worker_id.decode("utf-8")])
-
-            print("Remaining Workers:", self.workers)
-            print("task {} for worker {}:".format(task, worker_id))
             self.task_count += 1
             self.backend.send_multipart([worker_id,
                                 b'',
@@ -148,13 +157,7 @@ class LRUQueue(object):
         
         print("Task Queue:", self.task_queue)
 
-        # Attempting fix for below
-        # maybe create a separate process that checks how many workers are available
-        # And loops through them sending tasks (just a trigger)
-        # See comment above, when a new process is started, it will not work with the same sockets??
-        # p = Process(target=self.task_distribute_subprocess, args=(client_addr,))
-        # p.start()
-        self.task_distribute_subprocess(client_addr)
+        self.distribute_tasks(client_addr)
 
         if self.available_workers == 0:
             print('Stopping reception until workers are available.')

@@ -2,10 +2,9 @@ import zmq
 import os
 import json
 import time
-from helpers.influxdb_helper import InfluxDB_Helper
-from influxdb.line_protocol import quote_literal, quote_ident
 import pandas as pd
-from feature_extraction import feature_extraction_separate
+import multiprocessing
+from feature_extraction import database_specific
 
 current_milli_time = lambda: int(round(time.time() * 1000))
 
@@ -18,120 +17,121 @@ INFLUX_HOST = os.environ['INFLUX_HOST']
 INFLUX_PORT = os.environ['INFLUX_PORT']
 INFLUX_DB = os.environ['INFLUX_DB']
 
-def parse_groupby_dict(data, add_measurement=False):
-    df_list = []
+class Worker(object):
+    def __init__(self, worker_url, i):
+        self.worker_url = worker_url
+        self.i = i
 
-    for key, df in data.items():
-        measurement, (tags) = key
-        if add_measurement:
-            df['measurement'] = measurement
+    def parse_broker_message(self, message):
+        str_request = message.decode('ascii')
+        json_request = json.loads(str_request)
+        print("Broker: ", json_request)
 
-        for tag in tags:
-            name, value = tag
-            df[name] = value
+        db = database_specific.Database_Specific(INFLUX_HOST, INFLUX_PORT, INFLUX_DB)
 
-        df_list.append(df)
-        
-    return pd.concat(df_list)
+        db.get_rows_from_db(int(json_request['label']), limit=5000)
+        return json_request
 
-def down_sample_majority_class():
-    pass
+    def worker_thread(self, mpq):
+        """ Worker using REQ socket to do LRU routing """
+        context = zmq.Context.instance()
+        socket = context.socket(zmq.REQ)
 
-def get_rows_from_db(label):
-    activities = range(1, 13)
+        # set worker identity
+        socket.identity = (u"Worker_%s" % (self.i)).encode('ascii')
+        socket.connect(self.worker_url)
 
-    start = time.time()
-    influxdb_helper = InfluxDB_Helper(INFLUX_HOST, INFLUX_PORT)
-    df_client = influxdb_helper.get_client(df=True)
-    df_client.switch_database(INFLUX_DB)
+        # Tell the broker we are ready for work
+        # Send initial stats as well, such as cpu, speed etc...
+        socket.send(b"READY")
 
-    query = "SELECT * FROM {} " \
-        "GROUP BY \"user\" LIMIT 500".format(quote_ident('acc'))
+        print("Worker-{} is started...".format(ident))
+        # mpq.put("I am ready and free...")
+        try:
+            while True:
+                address, empty, request = socket.recv_multipart()
+                print("I received some task...")
 
-    result = df_client.query(query)
-    label_df = parse_groupby_dict(result)
-    label_df.index = label_df.index.tz_convert('Asia/Tokyo')
-    print(label_df.shape)
+                mpq.put("busy")
+                #  Before processing send a heartbeat
+                broker_dict_task = self.parse_broker_message(request)
 
-    grouped = label_df.groupby('label')
+                print("Received in Worker %s: %s\n" % (socket.identity.decode('ascii'),
+                                    request.decode('ascii')), end='')
 
-    window = 128
-    slide = 64
-    fs = 50.0
-    for name, group in grouped:
-        if name != int(label):
-            continue
-        print('label:', name)
-        temp_df = group.drop(['exp', 'label', 'user'], axis=1)
-        
-        # print(temp_df.head())
-        tAcc_XYZ = temp_df.values
-        all_Acc_features = feature_extraction_separate.compute_all_Acc_features(
-            tAcc_XYZ, window, slide, fs)
-        print(all_Acc_features.shape)
-        break
+                dict_rep = {}
+                dict_rep["mean"] = "Hello"
+                dict_rep["time"] = current_milli_time()
+                dict_rep = json.dumps(dict_rep)
 
-    elapsed = time.time() - start
-    print('elapsed:', elapsed)
-    pass
+                #  Send reply back to client
+                # socket.send_json(dict_rep)
+                
+                mpq.put("free")
+                socket.send_multipart([address, b'', dict_rep.encode('ascii')])
 
-def parse_broker_message(message):
-    str_request = message.decode('ascii')
-    #  Parse JSON Request (I dont know why i need to do this twice)
-    json_request = json.loads(str_request)
-    print("Broker: ", json_request)
+        except zmq.ContextTerminated:
+            # context terminated so quit silently
+            return
 
-    get_rows_from_db(int(json_request['label']))
-    return json_request
+class Heartbeat(object):
+    def __init__(self, worker_url, i):
+        self.worker_url = worker_url
+        self.i = i
+        self.status = "free"
 
-def worker_thread(worker_url, i):
-    """ Worker using REQ socket to do LRU routing """
-    context = zmq.Context.instance()
+    def heartbeat_process(self, mpq):
+        """ Worker using REQ socket to do LRU routing """
+        context = zmq.Context.instance()
+        poller = zmq.Poller()
+        socket = context.socket(zmq.DEALER)
 
-    socket = context.socket(zmq.REQ)
+        # set worker identity
+        socket.identity = (u"Worker_%s" % (self.i)).encode('ascii')
 
-    # set worker identity
-    socket.identity = (u"Worker-%s" % (i)).encode('ascii')
+        # Change socket name to "broker" or "queue"...
+        socket.connect(self.worker_url)
+        poller.register(socket, zmq.POLLIN)
+        try:
+            while True:
+                # Still confused about the timeout here... 1000\ 
+                socks = dict(poller.poll(1000))
 
-    socket.connect(worker_url)
+                # Might not even need this receive
+                # Handle worker activity on backend
+                if socks.get(socket) == zmq.POLLIN:
+                    frames = socket.recv_multipart()
+                    # print("Receiving from heartbeat partner:", frames)
+                # else:   
 
-    # Tell the broker we are ready for work
-    socket.send(b"READY")
+                while not mpq.empty():
+                    self.status = mpq.get()
+                    # print("MPQ:", self.status)
 
-    print("Worker-{} is started...".format(ident))
-    
-    # make this asynchronous so I can still send heartbeat messages during working
-    # Or go through the same path as Nakamura and just stop sending heartbeat so 
-    # This worker will be removed from the cluster...
-    try:
-        while True:
+                # socket.send(b"Ping...")]
+                lifetime = str(int(time.time()))
+                # socket.send_multipart([b'', b"Ping...", self.status.encode('ascii')])
+                socket.send_multipart([b'', b"Ping...", self.status.encode('ascii'), lifetime.encode('ascii')])
+                # print("trying to send heartbeat...")
+                time.sleep(3)
 
-            address, empty, request = socket.recv_multipart()
-            print("I received some task...")
-            #  Before processing send a heartbeat
-            broker_dict_task = parse_broker_message(request)
+        except zmq.ContextTerminated:
+            return
 
-            print("Received in Worker %s: %s\n" % (socket.identity.decode('ascii'),
-                                request.decode('ascii')), end='')
-
-            dict_rep = {}
-            dict_rep["mean"] = "Hello"
-            dict_rep["time"] = current_milli_time()
-            dict_rep = json.dumps(dict_rep)
-
-            #  Send reply back to client
-            # socket.send_json(dict_rep)
-            
-            socket.send_multipart([address, b'', dict_rep.encode('ascii')])
-
-    except zmq.ContextTerminated:
-        # context terminated so quit silently
-        return
+# https://www.geeksforgeeks.org/multiprocessing-python-set-2/
 
 def main():
     url_worker = "tcp://{}:{}".format(BROKER_HOST, BROKER_PORT)
-    print(url_worker)
-    worker_thread(url_worker, ident)
+    url_heartb = "tcp://{}:{}".format(BROKER_HOST, 9999)
+    print(url_worker, url_heartb)
+
+    q = multiprocessing.Queue()
+    
+    hb = Heartbeat(url_heartb, ident)
+    worker = Worker(url_worker, ident)
+
+    multiprocessing.Process(target=worker.worker_thread, args=(q, )).start()
+    multiprocessing.Process(target=hb.heartbeat_process, args=(q, )).start()
 
 if __name__ == "__main__":
     main()
