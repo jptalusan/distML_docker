@@ -10,6 +10,14 @@ import queue
 # https://github.com/zeromq/pyzmq/issues/1091
 
 current_milli_time = lambda: int(round(time.time() * 1000))
+HEARTBEAT_LIVENESS = 3     # 3..5 is reasonable
+HEARTBEAT_INTERVAL = 1.0   # Seconds
+
+class Worker(object):
+    def __init__(self, address):
+        self.address = address
+        self.expiry = time.time() + HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS
+    pass
 
 class LRUQueue(object):
     """LRUQueue class using ZMQStream/IOLoop for event dispatching"""
@@ -36,6 +44,14 @@ class LRUQueue(object):
         
         self.worker_status = {}
 
+    def readyWorker(self, worker):
+        """Prepare a worker by popping in the queue and placing inside again"""
+        pass
+
+    def purge(self):
+        """Look for & kill expired workers."""
+        pass
+
     # TODO: need to handle heartbeats itself, if the time is not new
     # for N seconds, remove it from the available worker list
     # Just time probably.
@@ -55,6 +71,8 @@ class LRUQueue(object):
         print("Curr time is: {}".format(str(int(time.time()))))
         print(self.worker_status)
 
+        # Is this the best place to put this?
+        self.purge()
 
     def handle_backend(self, msg):
         # Queue worker address for LRU routing
