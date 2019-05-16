@@ -1,7 +1,11 @@
 import time
 import json
+import os
 
-current_milli_time = lambda: int(round(time.time() * 1000))
+current_seconds_time = lambda: int(round(time.time()))
+PPP_XTRCT = os.environ['PPP_XTRCT']
+PPP_TRAIN = os.environ['PPP_TRAIN']
+PPP_CLSFY = os.environ['PPP_CLSFY']
 
 class TaskCreator(object):
     def __init__(self, client_request):
@@ -12,13 +16,15 @@ class TaskCreator(object):
         # or even divide by more, assuming workers can just
         # continue to work on another task after finishing one...
         task_queue = []
-        time_received = current_milli_time()
+        time_received = current_seconds_time()
+        # Range is based on number of classes
+        # TODO: Really need to change this
         for i in range(1, 13):
             broker_req = {}
             
             broker_req["sender"] = json_request["sender"]
-            broker_req["command"] = 'extract'
-            broker_req["broker_received_time"] = current_milli_time()
+            broker_req["command"] = PPP_XTRCT
+            broker_req["broker_received_time"] = current_seconds_time()
             broker_req["broker_processed_time"] = time_received
             broker_req["dataframe"] = None
             broker_req["model"] = 'RandomForest'

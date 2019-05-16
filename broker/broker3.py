@@ -10,6 +10,8 @@ import pprint
 import zmq
 from lruqueue.taskcreator import TaskCreator
 import random
+import blosc
+import pickle
 
 decode = lambda x: x.decode('utf-8')
 encode = lambda x: x.encode('ascii')
@@ -31,7 +33,15 @@ PPP_BUSY = (os.environ['PPP_BUSY']).encode('ascii')
 
 PPP_HEARTBEAT = (os.environ['PPP_HEARTBEAT']).encode('ascii')
 
+PPP_XTRCT = os.environ['PPP_XTRCT']
+PPP_TRAIN = os.environ['PPP_TRAIN']
+PPP_CLSFY = os.environ['PPP_CLSFY']
+
 GLOBAL_TASK_LIST = []
+tasks_received = 0
+tasks_sent = 0
+aggregated_pickles = []
+parsed_query = {}
 
 class DistributionFactory(object):
     def __init__(self, type):
@@ -43,9 +53,25 @@ class DistributionFactory(object):
             dist = RandomDistribution()
         self.distributor = dist
     
-    def distribute(self, backend_socket, workers, task):
-        print("Distribute abstract...")
-        self.distributor.distribute(backend_socket, workers, task)
+    def distribute(self, backend_socket, workers, task, extra):
+        """
+        An interface to distribute tasks to workers depending on the algorithm used
+        
+        Parameters
+        ----------
+        backend_socket : Socket
+            Where messages will be sent
+        workers : dict
+            Dict of available Workers (found in WorkerQueue)
+        task : list
+            List of tasks that need to be sent to objects on the other side of the backend_socket
+        extra : bytes
+            Extra information (TODO: change to a list so it can be extended)
+        Returns
+        -------
+        None
+        """
+        self.distributor.distribute(backend_socket, workers, task, extra)
 
 class LeastRecentlyUsed(object):
     def distribute(self):
@@ -64,19 +90,32 @@ class ByCapacity(object):
     pass
 
 class RandomDistribution(object):
-    def distribute(self, backend_socket, workers, task):
-        print(workers)
+    def distribute(self, backend_socket, workers, tasks, extra):
         klist = list(workers.keys())
-        print(klist)
         rlist = random.sample(klist, len(klist))
-        for ind, worker in enumerate(rlist):
-            rtask = task[random.randint(0, len(task) - 1)]
-            backend_socket.send_multipart([encode(worker),
-                                           encode(rtask)])
-            task.remove(rtask)
+        if __debug__:
+            print("RandomDistribution:{}".format(tasks))
+
+        if extra:
+            print("Extra {}".format(len(extra)))
+            print("There is extra...")
+        for ind, _ in enumerate(tasks):
+            worker = rlist[ind % len(rlist)]
+            rtask = tasks[random.randint(0, len(tasks) - 1)]
+            global tasks_sent
+            tasks_sent += 1
+            if extra == None:
+                backend_socket.send_multipart([encode(worker),
+                                               encode(rtask)])
+            else:
+                message = [encode(worker), 
+                           encode(rtask)]
+
+                message.extend(extra)
+                backend_socket.send_multipart(message)
+            tasks.remove(rtask)
             workers.pop(worker, None)
-            print(workers)
-            print(task)
+            
     def next(self):
         pass
     pass
@@ -131,14 +170,36 @@ class WorkerQueue(object):
         address, worker = self.queue.popitem(False)
         return address
 
-def accept_task(task):
-    # task = json.loads(task)
-    # tc = TaskCreator.TaskCreator(task)
-    # GLBOAL_TASK_LIST = tc.parse_request()
-    # print("TASKS:{}".format(GLBOAL_TASK_LIST))
+def accept_task(client_addr, task):
+    str_request = decode(task)
+    #  Parse JSON Request
+    json_request = json.loads(str_request)
+    json_request = json.loads(json_request)
 
-    # df = DistributionFactory("RND")
-    pass
+    command = json_request['command']
+    dict_req = {}
+    if command == PPP_TRAIN:
+
+        dict_req["sender"] = decode(client_addr)
+        dict_req["command"] = PPP_TRAIN
+        dict_req["req_time"] = current_seconds_time()
+        dict_req["model"] = 'RandomForest'
+
+    elif command == PPP_CLSFY:
+        pass
+    elif command == (PPP_TRAIN + PPP_CLSFY):
+        pass
+    else:
+        print("Incorrect task flag: {}".format(command))
+
+    dict_req = json.dumps(dict_req)
+    return dict_req
+
+def zip_and_pickle(obj, flags=0, protocol=-1):
+    """pickle an object, and zip the pickle before sending it"""
+    p = pickle.dumps(obj, protocol)
+    z = blosc.compress(p, typesize=8)
+    return z
 
 def main():
     url_client = "tcp://*:{}".format(FRONTEND_PORT)
@@ -172,8 +233,8 @@ def main():
 
             if socks.get(backend) == zmq.POLLIN:
                 msg = backend.recv_multipart()
-
-                print("Received message:{}".format(msg))
+                print("Received message length:{}".format(len(msg)))
+                # print("Received message:{}".format(msg))
                 worker_addr = msg[0]
 
                 # DEALER - [address, message]
@@ -181,27 +242,83 @@ def main():
                 ready, capab, stats = msg[1:4]
 
                 workers.ready(Worker(worker_addr, capab, stats))
-                if len(msg) > 4:
-                    r1, r2 = msg[4:6]
-                    # It means it finished some task
-                    # if __debug__:
-                    if GLOBAL_TASK_LIST:
-                        print("Remaining tasks {:d}".format(len(GLOBAL_TASK_LIST)))
-                        df = DistributionFactory("RND")
-                        df.distribute(backend, workers.queue, GLOBAL_TASK_LIST)
-                    else:
-                        print("No tasks remaining...")
-                if ready not in (PPP_READY, PPP_TASKS):
-                    print("E: Invalid message from worker: %s" % msg)
-                    # Accept some finished tasks from backend
-                else: # Try to change to some result flag
-                    # Send to frontend? or perform more tasks
-                    # Check if tasks are available
-                    pass
                 if __debug__:
                     backend.send_multipart([worker_addr,
                         b'I have added you to the queue...',
                         b'Another message.'])
+
+                if ready == PPP_TASKS:
+                    flag = decode(msg[4])
+                    client_addr = msg[5]
+
+                    if flag not in (PPP_READY, PPP_TASKS, PPP_XTRCT, PPP_TRAIN, PPP_CLSFY):
+                        print("E: Invalid flag from worker: %s" % decode(flag))
+                    else: # Try to change to some result flag
+                        # Send to frontend? or perform more tasks
+                        pass
+
+                    if flag == PPP_XTRCT:
+                        resp1, resp2 = msg[5:7]
+                        pickled = msg[8]
+
+                        extraction_tasks_processed_by_worker += 1
+
+                        unzipped = blosc.decompress(pickled)
+                        unpickld = pickle.loads(unzipped)
+                        aggregated_pickles.append(pickled)
+
+                        # DEBUGGER
+                        reply = [client_addr, 
+                                b"", 
+                                resp1, 
+                                b"",
+                                pickled]
+                        frontend.send_multipart(reply)
+
+                        # TODO: Idea, maybe add some task ID to verify that the task
+                        # sent is the one that has been processed.
+                        if GLOBAL_TASK_LIST:
+                            # If the task list has not been exhausted...
+                            df = DistributionFactory("RND")
+                            df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, None)
+                        else:
+                            if extraction_tasks_processed_by_worker == tasks_received:
+                                print("No tasks remaining...")
+                                print("Next task:{}".format(parsed_query))
+
+                                # Distribute next tasks (train or clsasify)
+                                df = DistributionFactory("RND")
+
+                                # TODO: This is stupid hahaha
+                                dict_req = json.loads(parsed_query)
+                                dict_req['req_time'] = current_seconds_time()
+                                dict_req = json.dumps(dict_req)
+
+                                print("Am i really failing here?")
+                                print(len(aggregated_pickles))
+
+                                df.distribute(backend, 
+                                              workers.queue, 
+                                              [parsed_query], 
+                                              aggregated_pickles)
+
+                                ''' Reset all things related to distributed worker tasks '''
+                                # TODO: Dangerous, might not be successfully sent...
+                                tasks_sent = 0
+                                
+                    if flag == PPP_TRAIN:
+                        response = msg[6]
+                        aggregated_pickles = []
+                        print("Flag {} executes with response: {}".format(flag, response))
+                        reply = [client_addr, 
+                                b"", 
+                                encode("Done with training...")]
+                        frontend.send_multipart(reply)
+                        pass
+                    if flag == PPP_CLSFY:
+                        rows_classified = msg[6]
+                        classifications = msg[7]
+                        pass
 
             if socks.get(heartbeat) == zmq.POLLIN:
                 # Update the worker queue
@@ -216,20 +333,33 @@ def main():
                     print("From HB:", msg)
 
             if socks.get(frontend) == zmq.POLLIN:
-                print("Worker count: ", len(workers.queue))
-                client_addr, _, query = frontend.recv_multipart()
-                msg = [client_addr, b"", encode("HOWDY, WAIT...")]
-                frontend.send_multipart(msg)
-                # accept_task(query)
+                aggregated_pickles = []
+                # TODO: In task creator, return a value that shows how many 
+                # of a particular tasks where received, ie. CLSFY, EXTRCT etc...
+                extraction_tasks_processed_by_worker = 0
 
+                print("Worker count: ", len(workers.queue))
+                # IF client is REQ
+                # client_addr, _, query = frontend.recv_multipart()
+                # IF client is DEALER
+                client_addr, query = frontend.recv_multipart()
+
+                # For generating secondary tasks (either classify, train or classify then train)
+                parsed_query = accept_task(client_addr, query)
+
+                print(parsed_query)
+
+                # For generating tasks for all workers (initial task)
                 tc = TaskCreator.TaskCreator(query)
-                # TODO: Check this if this is correct
                 GLOBAL_TASK_LIST.extend(tc.parse_request())
-                print("TASKS:{}".format(GLOBAL_TASK_LIST))
+                tasks_received = len(GLOBAL_TASK_LIST)
+
+                if __debug__:
+                    print("TASKS:{}".format(GLOBAL_TASK_LIST))
 
                 df = DistributionFactory("RND")
-                
-                df.distribute(backend, workers.queue, GLOBAL_TASK_LIST)
+                df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, None)
+
                 if __debug__:
                     print(workers.queue, GLOBAL_TASK_LIST)
                 pass
@@ -257,50 +387,3 @@ def main():
 
 if __name__ == "__main__":
     Process(target=main, args=()).start()
-
-
-# Using streams instead of poller for now
-# class Broker(object):
-#     # Set up sockets and streams
-#     def __init__(self, backend_socket):
-#         self.backend = ZMQStream(backend_socket)
-#         self.backend.on_recv(self.handle_backend)
-
-#         self.loop = IOLoop.instance()
-
-#         self.loop.make_current()
-
-#         print("WorkerQueue:__init__()")
-#         self.workers = WorkerQueue()
-
-#     def delegate_task(self, algorithm):
-#         pass
-
-#     def handle_frontend(self):
-#         pass
-
-#     def handle_backend(self, msg):
-#         print("Received message:{}".format(msg))
-#         worker_addr = msg[0]
-
-#         # DEALER - [address, message]
-#         # Validate control message, or return reply to client
-#         ready, capab, stats = msg[1:]
-#         if ready not in (PPP_READY):
-#             print("E: Invalid message from worker: %s" % msg)
-#         if ready == PPP_READY:
-#             self.workers.ready(Worker(worker_addr, capab, stats))
-        
-#         # Debug
-#         pprint.pprint(dict(self.workers.queue))
-
-#         # Check if tasks are available
-#         self.backend.send_multipart([worker_addr,
-#                                      b'I have added you to the queue...',
-#                                      b'Another message.'])
-#         pass
-
-#     def handle_heartbeat(self):
-#         pass
-
-#     pass

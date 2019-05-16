@@ -67,7 +67,7 @@ def generate_all_Gyr_features(gyr_x, gyr_y, gyr_z, fs):
         fBodyGyr_XYZ_features,
         fBodyGyrMag_features,
         fBodyGyrJerkMag_features,
-        tBodyGyro_additional_features
+        # tBodyGyro_additional_features
     ]).T
 
     return all_gyr_features
@@ -141,8 +141,8 @@ def generate_all_Acc_features(acc_x, acc_y, acc_z, fs):
         fBodyAccMag_features,
         fBodyAccJerkMag_features,
         acc_angle_features,
-        tBodyAcc_additional_features,
-        tBodyAccJerk_additional_features
+        # tBodyAcc_additional_features,
+        # tBodyAccJerk_additional_features
     ]).T
 
     return all_acc_features
@@ -154,12 +154,12 @@ def compute_all_Gyr_features(tGyr_XYZ, window, slide, fs):
     
     N = len(sliding_tGyr_X)
     all_Gyr_features = np.asarray([\
-        generate_all_Gyr_features(
-                sliding_tGyr_X[i], 
-                sliding_tGyr_Y[i],
-                sliding_tGyr_Z[i], 
-                fs
-            ) for i in range(N)]).T
+    generate_all_Gyr_features(
+            sliding_tGyr_X[i], 
+            sliding_tGyr_Y[i],
+            sliding_tGyr_Z[i], 
+            fs
+        ) for i in range(N)])
     
     return all_Gyr_features
 
@@ -170,12 +170,12 @@ def compute_all_Acc_features(tAcc_XYZ, window, slide, fs):
     
     N = len(sliding_tAcc_X)
     all_Acc_features = np.asarray([\
-        generate_all_Acc_features(
-                sliding_tAcc_X[i], 
-                sliding_tAcc_Y[i],
-                sliding_tAcc_Z[i], 
-                fs
-            ) for i in range(N)]).T
+    generate_all_Acc_features(
+            sliding_tAcc_X[i], 
+            sliding_tAcc_Y[i],
+            sliding_tAcc_Z[i], 
+            fs
+        ) for i in range(N)])
     
     return all_Acc_features
 
