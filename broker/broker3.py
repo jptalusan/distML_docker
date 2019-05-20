@@ -179,17 +179,16 @@ def accept_task(client_addr, task):
     command = json_request['command']
     dict_req = {}
     if command == PPP_TRAIN:
-
         dict_req["sender"] = decode(client_addr)
         dict_req["command"] = PPP_TRAIN
         dict_req["req_time"] = current_seconds_time()
         dict_req["model"] = 'RandomForest'
-
     elif command == PPP_CLSFY:
         pass
     elif command == (PPP_TRAIN + PPP_CLSFY):
         pass
     else:
+        dict_req = None
         print("Incorrect task flag: {}".format(command))
 
     dict_req = json.dumps(dict_req)
@@ -308,11 +307,13 @@ def main():
                                 
                     if flag == PPP_TRAIN:
                         response = msg[6]
+                        time_done = msg[7]
                         aggregated_pickles = []
                         print("Flag {} executes with response: {}".format(flag, response))
-                        reply = [client_addr, 
-                                b"", 
-                                encode("Done with training...")]
+                        print("Done in {}".format(decode(time_done)))
+                        reply = [client_addr,
+                                encode("Done with training..."),
+                                time_done]
                         frontend.send_multipart(reply)
                         pass
                     if flag == PPP_CLSFY:
@@ -332,8 +333,12 @@ def main():
                 if __debug__:
                     print("From HB:", msg)
 
+                # if __debug__:
+                print("HB:{}".format(workers.queue.keys()))
+
             if socks.get(frontend) == zmq.POLLIN:
                 aggregated_pickles = []
+                GLOBAL_TASK_LIST = []
                 # TODO: In task creator, return a value that shows how many 
                 # of a particular tasks where received, ie. CLSFY, EXTRCT etc...
                 extraction_tasks_processed_by_worker = 0
@@ -347,7 +352,7 @@ def main():
                 # For generating secondary tasks (either classify, train or classify then train)
                 parsed_query = accept_task(client_addr, query)
 
-                print(parsed_query)
+                print("Secondary task:{}".format(parsed_query))
 
                 # For generating tasks for all workers (initial task)
                 tc = TaskCreator.TaskCreator(query)
@@ -378,10 +383,9 @@ def main():
                 heartbeat_at = time.time() + HEARTBEAT_INTERVAL
 
             if __debug__:
-                pprint.pprint(dict(workers.queue))
                 print("Attempting to purge dead workers...")
+                pprint.pprint(dict(workers.queue))
             workers.purge()
-
     except zmq.ContextTerminated:
         return
 

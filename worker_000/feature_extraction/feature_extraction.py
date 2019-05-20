@@ -674,8 +674,6 @@ def generate_all_features_561(acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z, fs):
 
     return all_features
 
-
-
 def compute_all_features(tAcc_XYZ, tGyro_XYZ, window, slide, fs):
     sliding_tAcc_X = sliding_window(tAcc_XYZ[:, 0], window, slide)
     sliding_tAcc_Y = sliding_window(tAcc_XYZ[:, 1], window, slide)
@@ -688,8 +686,8 @@ def compute_all_features(tAcc_XYZ, tGyro_XYZ, window, slide, fs):
     N = len(sliding_tAcc_X)
 
     all_features = np.asarray([ \
-        generate_all_features(sliding_tAcc_X[i], sliding_tAcc_Y[i], sliding_tAcc_Z[i], sliding_tGyr_X[i],
+        generate_all_features_561(sliding_tAcc_X[i], sliding_tAcc_Y[i], sliding_tAcc_Z[i], sliding_tGyr_X[i],
                               sliding_tGyr_Y[i], sliding_tGyr_Z[i], fs) \
-        for i in range(N)]).T
+        for i in range(N)])
 
     return all_features

@@ -13,7 +13,8 @@ class TaskCreator(object):
 
     def generate_task_queue(self, json_request):
         # we get the total number of workers from heartbeat
-        # or even divide by more, assuming workers can just
+        # or even dividgreenubi
+        # e by more, assuming workers can just
         # continue to work on another task after finishing one...
         task_queue = []
         time_received = current_seconds_time()
@@ -26,9 +27,9 @@ class TaskCreator(object):
             broker_req["command"] = PPP_XTRCT
             broker_req["broker_received_time"] = current_seconds_time()
             broker_req["broker_processed_time"] = time_received
-            broker_req["dataframe"] = None
-            broker_req["model"] = 'RandomForest'
-            broker_req["rows"] = 100
+            broker_req["database"] = json_request["database"]
+            broker_req["model"] = json_request["model"]
+            broker_req["rows"] = json_request["rows"]
             broker_req["label"] = i
             # broker_req["distribution"] = 1 # Make as function?
 
@@ -42,31 +43,6 @@ class TaskCreator(object):
         json_request = json.loads(str_request)
         json_request = json.loads(json_request)
         print(json_request)
-        print(type(json_request))
-
-        # time_received = current_milli_time()
-
-        # sender = json_request["sender"]
-        # command = json_request["command"]
-        # if json_request["dataframe"] != None:
-        #     dataframe = json_request["dataframe"]
-
-        # req_time = json_request["req_time"]
-        # model = json_request["model"]
-        # rows = json_request["rows"]
-        # distribution = json_request["distribution"]
-
-        # broker_req = {}
-
-        # broker_req["sender"] = sender
-        # broker_req["command"] = 'train'
-        # broker_req["broker_received_time"] = current_milli_time()
-        # broker_req["broker_processed_time"] = time_received
-        # broker_req["dataframe"] = None
-        # broker_req["model"] = 'RandomForest'
-        # broker_req["rows"] = 100
-        # # broker_req["distribution"] = 1 # Make as function?
-
-        # return json.dumps(broker_req)
+        # print(type(json_request))
 
         return self.generate_task_queue(json_request)
