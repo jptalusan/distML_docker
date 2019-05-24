@@ -73,8 +73,8 @@ class Heartbeat(object):
 
                 if socks.get(socket) == zmq.POLLIN:
                     frames = socket.recv_multipart()
-                    # if __debug__:
-                    print("Received HB")
+                    if __debug__:
+                        print("Received HB")
                     socket.send_multipart([PPP_HEARTBEAT,
                                             PPP_CAPAB_PI,
                                             PPP_FREE])
@@ -93,11 +93,11 @@ def extract_features(label, database, limit):
     dbs = database_specific.Database_Specific(INFLUX_HOST, INFLUX_PORT, INFLUX_DB)
     if database == 'both':
         nout = dbs.get_rows_with_label_both(int(label), limit=limit)
-        print("Nout {}:{}".format(database, nout.shape))
+        # print("Nout {}:{}".format(database, nout.shape))
         return nout
     elif database == 'acc' or database == 'gyro':
         nout = dbs.get_rows_with_label(int(label), database, limit=limit)
-        print("Nout {}:{}".format(database, nout.shape))
+        # print("Nout {}:{}".format(database, nout.shape))
         return nout
     else:
         return None
@@ -116,6 +116,9 @@ class TrainingFactory(object):
     def train(self, numpy_arr):
         self.trainer.train(numpy_arr)
 
+    def accuracy(self):
+        return self.trainer.accuracy()
+
 class RandomForest(object):
     def train(self, numpy_arr):
         print("RandomForest()")
@@ -126,7 +129,7 @@ class RandomForest(object):
             print(X.shape)
             print(y.shape)
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=None)
 
         if __debug__:
             print(X_train.shape)
@@ -138,13 +141,17 @@ class RandomForest(object):
         X_train = sc.fit_transform(X_train)
         X_test = sc.transform(X_test)
 
-        regressor = RandomForestClassifier(n_estimators=20, random_state=0)  
-        regressor.fit(X_train, y_train)  
+        regressor = RandomForestClassifier(n_estimators=20, random_state=None)  
+        regressor.fit(X_train, y_train.ravel())  
         y_pred = regressor.predict(X_test)  
 
         print(confusion_matrix(y_test,y_pred))
         print(classification_report(y_test,y_pred))
-        print(accuracy_score(y_test, y_pred))
+        self.accuracy_score = accuracy_score(y_test, y_pred)
+        print("accuracy:{}".format(self.accuracy_score))
+
+    def accuracy(self):
+        return self.accuracy_score
 
     def next(self):
         pass
@@ -175,12 +182,14 @@ class Worker(object):
         try:
             while True:
                 message_from_router = socket.recv_multipart()
-                print("WR: received some tasklen:{}".format(len(message_from_router)))
-
+                # print("WR: received some tasklen:{}".format(len(message_from_router)))
+            
                 json_req = parse_broker_message(message_from_router[0])
                 client_addr = json_req['sender']
                 command = json_req['command']
                 if command == PPP_XTRCT:
+                    print("Query received from broker at {}".format(str(current_seconds_time())))
+
                     label = json_req['label']
                     database = json_req['database']
                     # DEBUG
@@ -189,8 +198,9 @@ class Worker(object):
                         label_col = np.full((numpy_arr.shape[0], 1), int(label))
                         numpy_arr = np.append(numpy_arr, label_col, axis=1)
                         zipped = zip_and_pickle(numpy_arr)
-                        print("After label: ", numpy_arr.shape)
-                        print("WR: done working...")
+                        print("Query processed by {} in {}".format(self.identity, str(current_seconds_time())))
+                        # print("After label: ", numpy_arr.shape)
+                        # print("WR: done working...")
                         socket.send_multipart([PPP_TASKS,
                                             PPP_CAPAB_PI,
                                             PPP_FREE,
@@ -224,7 +234,8 @@ class Worker(object):
                                         encode(PPP_TRAIN),
                                         encode(client_addr),
                                         b"Im done with TRAINING...",
-                                        encode(str(current_seconds_time()))])
+                                        encode(str(current_seconds_time())),
+                                        encode(str(tf.accuracy()))])
 
         except zmq.ContextTerminated:
             # context terminated so quit silently

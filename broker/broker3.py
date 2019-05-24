@@ -89,17 +89,18 @@ class ByCapacity(object):
         pass
     pass
 
+# Should I multiprocess this? But the tasklist is only a single item, it might cause problems...
 class RandomDistribution(object):
     def distribute(self, backend_socket, workers, tasks, extra):
-        klist = list(workers.keys())
-        rlist = random.sample(klist, len(klist))
         if __debug__:
             print("RandomDistribution:{}".format(tasks))
 
-        if extra:
-            print("Extra {}".format(len(extra)))
-            print("There is extra...")
         for ind, _ in enumerate(tasks):
+            if len(workers) == 0:
+                break
+            klist = list(workers.keys())
+            rlist = random.sample(klist, len(klist))
+
             worker = rlist[ind % len(rlist)]
             rtask = tasks[random.randint(0, len(tasks) - 1)]
             global tasks_sent
@@ -107,10 +108,12 @@ class RandomDistribution(object):
             if extra == None:
                 backend_socket.send_multipart([encode(worker),
                                                encode(rtask)])
+                print("Query {} sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
             else:
                 message = [encode(worker), 
                            encode(rtask)]
 
+                print("Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
                 message.extend(extra)
                 backend_socket.send_multipart(message)
             tasks.remove(rtask)
@@ -265,13 +268,16 @@ def main():
                         unzipped = blosc.decompress(pickled)
                         unpickld = pickle.loads(unzipped)
                         aggregated_pickles.append(pickled)
+                        
+                        curr_time = str(current_seconds_time())
+                        print("Fextract response received from {} at {}".format(worker_addr, curr_time))
 
                         # DEBUGGER
+                        # if __debug__:
                         reply = [client_addr, 
-                                b"", 
-                                resp1, 
-                                b"",
-                                pickled]
+                                b"XTRACT_RESP",
+                                worker_addr, 
+                                encode(curr_time)]
                         frontend.send_multipart(reply)
 
                         # TODO: Idea, maybe add some task ID to verify that the task
@@ -293,9 +299,6 @@ def main():
                                 dict_req['req_time'] = current_seconds_time()
                                 dict_req = json.dumps(dict_req)
 
-                                print("Am i really failing here?")
-                                print(len(aggregated_pickles))
-
                                 df.distribute(backend, 
                                               workers.queue, 
                                               [parsed_query], 
@@ -309,11 +312,13 @@ def main():
                         response = msg[6]
                         time_done = msg[7]
                         aggregated_pickles = []
-                        print("Flag {} executes with response: {}".format(flag, response))
+                        print("Flag {} executed with response: {}".format(flag, response))
                         print("Done in {}".format(decode(time_done)))
                         reply = [client_addr,
-                                encode("Done with training..."),
-                                time_done]
+                                b"TRAIN_RESP",
+                                worker_addr,
+                                time_done,
+                                msg[8]]
                         frontend.send_multipart(reply)
                         pass
                     if flag == PPP_CLSFY:
@@ -333,8 +338,8 @@ def main():
                 if __debug__:
                     print("From HB:", msg)
 
-                # if __debug__:
-                print("HB:{}".format(workers.queue.keys()))
+                if __debug__:
+                    print("HB:{}".format(workers.queue.keys()))
 
             if socks.get(frontend) == zmq.POLLIN:
                 aggregated_pickles = []

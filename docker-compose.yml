@@ -1,4 +1,4 @@
-version: "2.2"
+version: "3.2"
 services:
   worker_000:
     build: ./worker_000/
@@ -41,6 +41,123 @@ services:
     depends_on: 
       - broker
 
+  worker_003:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0003
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_004:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0004
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_005:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0005
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_006:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0006
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_007:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0007
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_008:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0008
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_009:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0009
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_010:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0010
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
+  worker_011:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0011
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+
   broker:
     build: ./broker/
     ports:
@@ -68,6 +185,39 @@ services:
     logging:
       driver: none
       
+# CAdvisor + Prometheus monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+    - 9090:9090
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+    - ./prometheus:/etc/prometheus:ro
+    # - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+    - cadvisor
+
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    ports:
+    - 8080:8080
+    volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:rw
+    - /sys:/sys:ro
+    - /var/lib/docker/:/var/lib/docker:ro
+    depends_on:
+    - redis
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+    - 6379:6379
+
 # networks:
 #   internal_network:
 #     driver: overlay
