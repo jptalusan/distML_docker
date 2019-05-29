@@ -151,6 +151,7 @@ class RandomForest(object):
             print(y_test.shape)
 
         sc = StandardScaler()
+        # https://stackoverflow.com/questions/48692500/fit-transform-on-training-data-and-transform-on-test-data
         X_train = sc.fit_transform(X_train)
         X_test = sc.transform(X_test)
 
@@ -184,7 +185,15 @@ class RandomForest(object):
 class Classifier(object):
     pass
 
-
+def split_aggregated_feature_extracted(aggregated_pickles):
+    output = []
+    for pickled in aggregated_pickles:
+        unzipped = blosc.decompress(pickled)
+        unpickld = pickle.loads(unzipped)
+        temp = unpickld.tolist()
+        output.extend(temp)
+    np_output = np.asarray(output)
+    return np_output
 
 def combine_rfs(rf_a, rf_b):
     rf_a.estimators_ += rf_b.estimators_
@@ -254,15 +263,16 @@ class Worker(object):
                     pickle_arr = message_from_router[1:]
 
                     print("number of pickles received: {}".format(len(pickle_arr)))
-                    output = []
-                    for pickled in pickle_arr:
-                        unzipped = blosc.decompress(pickled)
-                        unpickld = pickle.loads(unzipped)
-                        temp = unpickld.tolist()
-                        output.extend(temp)
-                    np_output = np.asarray(output)
+                    np_output = split_aggregated_feature_extracted(pickle_arr)
+                    # for pickled in pickle_arr:
+                    #     unzipped = blosc.decompress(pickled)
+                    #     unpickld = pickle.loads(unzipped)
+                    #     temp = unpickld.tolist()
+                    #     output.extend(temp)
+                    # np_output = np.asarray(output)
                     print(np_output.shape)
 
+                    # TODO: Should I clear this each time? a new message arrives?
                     tf = TrainingFactory("RF")
                     tf.train(np_output)
                     
@@ -298,6 +308,30 @@ class Worker(object):
 
                 elif command == PPP_CLSFY:
                     print("Got something from here...")
+                    pickle_arr = message_from_router[1:]
+                    np_output = split_aggregated_feature_extracted(pickle_arr)
+                    print("Pickle array for validation...", np_output.shape)
+
+                    # ~~~~~~~~~~~~~~# DEBUGGING
+                    X = np_output[:,:-1]
+                    y = np_output[:,-1:]
+
+                    X_train, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=None)
+
+
+                    # TODO: It fails without this, how do I do machine learning?!
+                    sc = StandardScaler()
+                    X_train = sc.fit_transform(X_train)
+                    X_test = sc.transform(X_test)
+
+                    clf = load('combined_rf_model.joblib') 
+                    y_pred = clf.predict(X_test)  
+
+                    print(confusion_matrix(y_test, y_pred))
+                    print(classification_report(y_test, y_pred))
+                    acc = accuracy_score(y_test, y_pred)
+                    print("accuracy:{}".format(acc))
+                    # ~~~~~~~~~~~~~~~# END
                     pass
 
         except zmq.ContextTerminated:

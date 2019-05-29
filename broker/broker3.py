@@ -393,8 +393,10 @@ def main():
                                     secondary_queries = [x for item in secondary_queries for x in repeat(item, len(split_pickles_arr))]
                                     # TODO: duplicate parsed_query... same as length of n_arr
 
-                                    print("Len of split pickles arr: {}".format(len(split_pickles_arr)))
-                                    print("Len of secondary_queries: {}".format(len(secondary_queries)))
+                                    if __debug__:
+                                        print("Len of split pickles arr: {}".format(len(split_pickles_arr)))
+                                        print("Len of secondary_queries: {}".format(len(secondary_queries)))
+                                        
                                     df.distribute(backend, 
                                               workers.queue, 
                                               secondary_queries, 
@@ -402,7 +404,7 @@ def main():
                                               method=dict_req["train_dist_method"])
                                 elif dict_req["train_dist_method"] == CENTRALIZED:
                                     print("training centralized")                                
-                                # TODO: Super janky, but pickle array should be same length as parsed query.                            
+                                    # TODO: Super janky, but pickle array should be same length as parsed query.                            
                                     parsed_query = json.dumps(dict_req)
                                     df.distribute(backend, 
                                                 workers.queue, 
@@ -417,7 +419,11 @@ def main():
                     if flag == PPP_TRAIN:
                         response = msg[6]
                         time_done = msg[7]
-                        
+                        # TODO: WHATFHADAWD is this?>!eqeq
+                        # It all relies on what the first query of the client is...
+                        # WHAT IF MULTIPLE CLIENTs with DIFFERENT queries send at the same time!?
+                        # dict_req = json.loads(parsed_query)
+
                         print("Flag {} executed with response: {}".format(flag, response))
 
                         if dict_req["train_dist_method"] == DISTRIBUTED:
@@ -479,7 +485,9 @@ def main():
 
                                     # ~~~~~~~~~~~~~~~ # solely for validation purposes
                                     print("Dist aggregated pickles len: {}".format(len(aggregated_pickles)))
-                                    print("Dist aggregated pickle[0] shape: {}".format(aggregated_pickles[0].shape))
+
+                                    # feat_extd_data = split_aggregated_feature_extracted(aggregated_pickles)
+                                    # print("Dist aggregated pickle[0] shape: {}".format(feat_extd_data.shape))
 
                                     dict_req = {}
                                     dict_req["sender"] = decode(client_addr)
@@ -512,17 +520,6 @@ def main():
                                     time_done,
                                     msg[8]]
                             frontend.send_multipart(reply)
-
-                        # TODO: Need to distribute again if the number of 
-                        # tasks has not finished, and then have another if statement like line: 313
-                        # To aggregate all trees. This needs to be fixed so that even for centralized
-                        # method it should work.
-                        # parsed_query = json.dumps(dict_req)
-                        # df.distribute(backend, 
-                        #                 workers.queue, 
-                        #                 [parsed_query], 
-                        #                 aggregated_pickles)
-                        pass
 
                     if flag == PPP_CLSFY:
                         rows_classified = msg[6]
