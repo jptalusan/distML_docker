@@ -18,6 +18,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn import metrics
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
+import psutil
+import functools
+from joblib import dump, load
+
 decode = lambda x: x.decode('utf-8')
 encode = lambda x: x.encode('ascii')
 current_seconds_time = lambda: int(round(time.time()))
@@ -46,6 +50,9 @@ PPP_XTRCT = os.environ['PPP_XTRCT']
 PPP_TRAIN = os.environ['PPP_TRAIN']
 PPP_CLSFY = os.environ['PPP_CLSFY']
 
+DISTRIBUTED = os.environ['DISTRIBUTED']
+CENTRALIZED = os.environ['CENTRALIZED']
+
 HEARTBEAT_INTERVAL = float(os.environ['HEARTBEAT_INTERVAL']) #seconds
 
 # Must create separate process since tasks may range from instant to too long
@@ -73,8 +80,11 @@ class Heartbeat(object):
 
                 if socks.get(socket) == zmq.POLLIN:
                     frames = socket.recv_multipart()
+                    
                     if __debug__:
                         print("Received HB")
+                        print(psutil.cpu_percent(interval=None, percpu=False))
+                        print(psutil.cpu_percent(interval=None, percpu=True))
                     socket.send_multipart([PPP_HEARTBEAT,
                                             PPP_CAPAB_PI,
                                             PPP_FREE])
@@ -119,6 +129,9 @@ class TrainingFactory(object):
     def accuracy(self):
         return self.trainer.accuracy()
 
+    def zipped_pickle_model(self):
+        return zip_and_pickle(self.trainer.model())
+
 class RandomForest(object):
     def train(self, numpy_arr):
         print("RandomForest()")
@@ -141,9 +154,9 @@ class RandomForest(object):
         X_train = sc.fit_transform(X_train)
         X_test = sc.transform(X_test)
 
-        regressor = RandomForestClassifier(n_estimators=20, random_state=None)  
-        regressor.fit(X_train, y_train.ravel())  
-        y_pred = regressor.predict(X_test)  
+        self.classifier = RandomForestClassifier(n_estimators=20, random_state=None)  
+        self.classifier.fit(X_train, y_train.ravel())  
+        y_pred = self.classifier.predict(X_test)  
 
         print(confusion_matrix(y_test,y_pred))
         print(classification_report(y_test,y_pred))
@@ -155,7 +168,28 @@ class RandomForest(object):
 
     def next(self):
         pass
+    
+    def model(self):
+        return self.classifier
+
+    def predict(self, numpy_arr):
+        pass
+
+    def validate(self, X, y):
+
+        pass
+
     pass
+
+class Classifier(object):
+    pass
+
+
+
+def combine_rfs(rf_a, rf_b):
+    rf_a.estimators_ += rf_b.estimators_
+    rf_a.n_estimators = len(rf_a.estimators_)
+    return rf_a
 
 class Worker(object):
     def __init__(self, worker_url, i):
@@ -192,8 +226,9 @@ class Worker(object):
 
                     label = json_req['label']
                     database = json_req['database']
+                    rows = int(json_req['rows'])
                     # DEBUG
-                    numpy_arr = extract_features(label, database, 2000)
+                    numpy_arr = extract_features(label, database, rows)
                     if numpy_arr.size != 0:
                         label_col = np.full((numpy_arr.shape[0], 1), int(label))
                         numpy_arr = np.append(numpy_arr, label_col, axis=1)
@@ -201,6 +236,9 @@ class Worker(object):
                         print("Query processed by {} in {}".format(self.identity, str(current_seconds_time())))
                         # print("After label: ", numpy_arr.shape)
                         # print("WR: done working...")
+
+                        print("After sending:", psutil.cpu_percent(interval=None, percpu=False))
+                        print("After sending:", psutil.cpu_percent(interval=None, percpu=True))
                         socket.send_multipart([PPP_TASKS,
                                             PPP_CAPAB_PI,
                                             PPP_FREE,
@@ -235,7 +273,32 @@ class Worker(object):
                                         encode(client_addr),
                                         b"Im done with TRAINING...",
                                         encode(str(current_seconds_time())),
-                                        encode(str(tf.accuracy()))])
+                                        encode(str(tf.accuracy())),
+                                        tf.zipped_pickle_model()])
+                # TODO: This is specifically for distributedly trained RF!
+                elif command == "AGGREGATE_MODELS":
+                    print(json_req['command'])
+                    pickle_arr = message_from_router[1:]
+
+                    unpickled_arr = []
+                    for ind, pickled in enumerate(pickle_arr):
+                        unzipped = blosc.decompress(pickled)
+                        clf = pickle.loads(unzipped)
+                        print("C Clf{}:{}".format(ind, clf))
+                        unpickled_arr.append(clf)
+
+                    combined_rf_model = functools.reduce(combine_rfs, unpickled_arr)
+
+                    # TODO: I guess ok for now. But if i only have a single volume, this is weird/wrong
+                    dump(combined_rf_model, 'combined_rf_model.joblib') 
+
+                    # TODO: Test or classify to verify effect
+                    print("Combined Clf:{}".format(combined_rf_model))
+                    pass
+
+                elif command == PPP_CLSFY:
+                    print("Got something from here...")
+                    pass
 
         except zmq.ContextTerminated:
             # context terminated so quit silently

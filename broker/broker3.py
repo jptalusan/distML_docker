@@ -12,6 +12,11 @@ from lruqueue.taskcreator import TaskCreator
 import random
 import blosc
 import pickle
+import numpy as np
+from itertools import repeat
+
+import sklearn
+from sklearn.ensemble import RandomForestClassifier
 
 decode = lambda x: x.decode('utf-8')
 encode = lambda x: x.encode('ascii')
@@ -37,7 +42,11 @@ PPP_XTRCT = os.environ['PPP_XTRCT']
 PPP_TRAIN = os.environ['PPP_TRAIN']
 PPP_CLSFY = os.environ['PPP_CLSFY']
 
+DISTRIBUTED = os.environ['DISTRIBUTED']
+CENTRALIZED = os.environ['CENTRALIZED']
+
 GLOBAL_TASK_LIST = []
+secondary_queries = []
 tasks_received = 0
 tasks_sent = 0
 aggregated_pickles = []
@@ -51,9 +60,11 @@ class DistributionFactory(object):
             dist = ByCapacity()
         if type == "RND":
             dist = RandomDistribution()
+        if type == "RND-CENTRAL":
+            dist = RandomDistributionCentralized()
         self.distributor = dist
     
-    def distribute(self, backend_socket, workers, task, extra):
+    def distribute(self, backend_socket, workers, task, extra, method):
         """
         An interface to distribute tasks to workers depending on the algorithm used
         
@@ -71,7 +82,13 @@ class DistributionFactory(object):
         -------
         None
         """
-        self.distributor.distribute(backend_socket, workers, task, extra)
+        self.distributor.distribute(backend_socket, workers, task, extra, method)
+
+    def last_worker(self):
+        return self.distributor.last_worker
+
+    def distributor(self):
+        return self.distributor
 
 class LeastRecentlyUsed(object):
     def distribute(self):
@@ -89,9 +106,29 @@ class ByCapacity(object):
         pass
     pass
 
+class RandomDistributionCentralized(object):
+    def distribute(self, backend_socket, workers, task, extra, method=None):
+        workers.pop(self.selected_worker, None)
+        message = [encode(self.selected_worker), 
+                encode(task)]
+        message.extend(extra)
+        backend_socket.send_multipart(message)
+        self.last_worker = self.selected_worker
+    def next(self):
+        pass
+    
+    def last_worker(self):
+        return self.last_worker
+
+    def select_worker(self, worker_address):
+        self.selected_worker = worker_address
+    
+class RandomDistributionDistributed(object):
+    pass
+
 # Should I multiprocess this? But the tasklist is only a single item, it might cause problems...
 class RandomDistribution(object):
-    def distribute(self, backend_socket, workers, tasks, extra):
+    def distribute(self, backend_socket, workers, tasks, extra, method):
         if __debug__:
             print("RandomDistribution:{}".format(tasks))
 
@@ -110,15 +147,38 @@ class RandomDistribution(object):
                                                encode(rtask)])
                 print("Query {} sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
             else:
-                message = [encode(worker), 
-                           encode(rtask)]
+                # TODO: Must differentiate between centralized and distributed here as well
+                # Distributed
+                if method == DISTRIBUTED:
+                    message = [encode(worker), 
+                            encode(rtask),
+                            extra[ind]]
+                    print("D Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
+                    # backend_socket.send_multipart(message)
+                    extra.remove(extra[ind])
+                    # print("Len of extra remaining:{}".format(len(extra)))
 
-                print("Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
-                message.extend(extra)
+                # Centralized
+                elif method == CENTRALIZED:
+                    message = [encode(worker), 
+                            encode(rtask)]
+                    message.extend(extra)
+                    print("C Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
+                    
+                elif method == 'AGGREGATE_MODELS':
+                    pass
+
+                print("Len of extra remaining:{}".format(len(extra)))
                 backend_socket.send_multipart(message)
+                
             tasks.remove(rtask)
+            self.last_worker = worker
             workers.pop(worker, None)
-            
+            print("Len of tasks remaining:{}".format(len(tasks)))
+
+    def last_worker(self):
+        return self.last_worker
+
     def next(self):
         pass
     pass
@@ -173,29 +233,36 @@ class WorkerQueue(object):
         address, worker = self.queue.popitem(False)
         return address
 
-def accept_task(client_addr, task):
-    str_request = decode(task)
-    #  Parse JSON Request
+# TODO: Change name of this
+def generate_2ndry_tasks(n_arr):
+    pickle_arr = []
+    for n_ in n_arr:
+        temp = zip_and_pickle(n_)
+        pickle_arr.append(temp)
+    return pickle_arr
+
+# TODO: For some reason, the shuffle is not working? I thought it was inplace.
+# This might cause too much memory use though. (most probably)
+def split(a, n):
+    # np.random.shuffle(a)
+    a_ = a[np.random.permutation(a.shape[0])]
+    k, m = divmod(len(a_), n)
+    return (a_[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
+
+def split_aggregated_feature_extracted(aggregated_pickles):
+    output = []
+    for pickled in aggregated_pickles:
+        unzipped = blosc.decompress(pickled)
+        unpickld = pickle.loads(unzipped)
+        temp = unpickld.tolist()
+        output.extend(temp)
+    np_output = np.asarray(output)
+    return np_output
+
+def parse_broker_message(message):
+    str_request = decode(message)
     json_request = json.loads(str_request)
-    json_request = json.loads(json_request)
-
-    command = json_request['command']
-    dict_req = {}
-    if command == PPP_TRAIN:
-        dict_req["sender"] = decode(client_addr)
-        dict_req["command"] = PPP_TRAIN
-        dict_req["req_time"] = current_seconds_time()
-        dict_req["model"] = 'RandomForest'
-    elif command == PPP_CLSFY:
-        pass
-    elif command == (PPP_TRAIN + PPP_CLSFY):
-        pass
-    else:
-        dict_req = None
-        print("Incorrect task flag: {}".format(command))
-
-    dict_req = json.dumps(dict_req)
-    return dict_req
+    return json_request
 
 def zip_and_pickle(obj, flags=0, protocol=-1):
     """pickle an object, and zip the pickle before sending it"""
@@ -267,6 +334,8 @@ def main():
 
                         unzipped = blosc.decompress(pickled)
                         unpickld = pickle.loads(unzipped)
+
+                        print("Unpickled shape: {}".format(unpickld.shape))
                         aggregated_pickles.append(pickled)
                         
                         curr_time = str(current_seconds_time())
@@ -285,24 +354,61 @@ def main():
                         if GLOBAL_TASK_LIST:
                             # If the task list has not been exhausted...
                             df = DistributionFactory("RND")
-                            df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, None)
+                            df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, extra=None, method=None)
                         else:
                             if extraction_tasks_processed_by_worker == tasks_received:
                                 print("No tasks remaining...")
                                 print("Next task:{}".format(parsed_query))
 
+                                pickled_clf_arr = []
+                                dist_model_accs = []
+                                training_tasks_processed_by_worker = 0
                                 # Distribute next tasks (train or clsasify)
                                 df = DistributionFactory("RND")
 
                                 # TODO: This is stupid hahaha
+                                # TODO: This is a global variable now
                                 dict_req = json.loads(parsed_query)
                                 dict_req['req_time'] = current_seconds_time()
-                                dict_req = json.dumps(dict_req)
 
-                                df.distribute(backend, 
+                                # Should include [distributed] as a CONSTANTS
+                                if dict_req["train_dist_method"] == DISTRIBUTED:
+                                    print("Im trying something here...")
+                                    n_ = split_aggregated_feature_extracted(aggregated_pickles)
+                                    print(n_.shape)
+                                    
+                                    # TODO: The split should be prepared by request or algorithm
+                                    number_of_trainers = 5
+
+                                    n_arr = list(split(n_, number_of_trainers))
+            
+                                    # checking if it was randomized
+                                    if np.equal(n_[0:50], n_arr[0][0:50]).all():
+                                        print("Equal")
+                                    else:
+                                        print("Not equal")
+
+                                    split_pickles_arr = generate_2ndry_tasks(n_arr)
+                                    secondary_queries = [parsed_query]
+                                    secondary_queries = [x for item in secondary_queries for x in repeat(item, len(split_pickles_arr))]
+                                    # TODO: duplicate parsed_query... same as length of n_arr
+
+                                    print("Len of split pickles arr: {}".format(len(split_pickles_arr)))
+                                    print("Len of secondary_queries: {}".format(len(secondary_queries)))
+                                    df.distribute(backend, 
                                               workers.queue, 
-                                              [parsed_query], 
-                                              aggregated_pickles)
+                                              secondary_queries, 
+                                              split_pickles_arr,
+                                              method=dict_req["train_dist_method"])
+                                elif dict_req["train_dist_method"] == CENTRALIZED:
+                                    print("training centralized")                                
+                                # TODO: Super janky, but pickle array should be same length as parsed query.                            
+                                    parsed_query = json.dumps(dict_req)
+                                    df.distribute(backend, 
+                                                workers.queue, 
+                                                [parsed_query], 
+                                                aggregated_pickles,
+                                                method=dict_req["train_dist_method"])
 
                                 ''' Reset all things related to distributed worker tasks '''
                                 # TODO: Dangerous, might not be successfully sent...
@@ -311,16 +417,113 @@ def main():
                     if flag == PPP_TRAIN:
                         response = msg[6]
                         time_done = msg[7]
-                        aggregated_pickles = []
+                        
                         print("Flag {} executed with response: {}".format(flag, response))
-                        print("Done in {}".format(decode(time_done)))
-                        reply = [client_addr,
-                                b"TRAIN_RESP",
-                                worker_addr,
-                                time_done,
-                                msg[8]]
-                        frontend.send_multipart(reply)
+
+                        if dict_req["train_dist_method"] == DISTRIBUTED:
+                            training_tasks_processed_by_worker += 1
+                            model_accuracy = msg[8]
+                            zipped_pickled_model = msg[9]
+                            
+                            # TODO: Get the ML models here for aggregation.
+                            # Put into array and send into a single centralized compiler (not trainer)
+                            
+                            pickled_clf_arr.append(zipped_pickled_model)
+                            dist_model_accs.append(decode(model_accuracy))
+
+                            # TODO: Store array of accuracies as well?
+                            if secondary_queries:
+                                df = DistributionFactory("RND")
+                                df.distribute(backend, 
+                                            workers.queue, 
+                                            secondary_queries, 
+                                            split_pickles_arr,
+                                            method=dict_req["train_dist_method"])
+                            else:
+                                # TODO: Sobrang janky nito kadire
+                                # TODO: Need to clear some variables...
+                                if training_tasks_processed_by_worker == number_of_trainers:
+                                    print("Just need to aggregate here...")
+                                    number_of_trainers = 0
+                                    print("Len of pickled arr: {}".format(len(pickled_clf_arr)))
+
+                                    # TODO: Generate one more task to aggregate the models.
+                                    # TODO: Need to test them
+                                    dict_req = {}
+                                    dict_req["sender"] = decode(client_addr)
+                                    dict_req["command"] = "AGGREGATE_MODELS"
+                                    dict_req["req_time"] = current_seconds_time()
+                                    dict_req["model"] = 'RandomForest'
+                                    dict_req["train_dist_method"] = CENTRALIZED
+                                    tertiary_query = json.dumps(dict_req)
+                                    df = DistributionFactory("RND")
+                                    df.distribute(backend, 
+                                            workers.queue, 
+                                            [tertiary_query], 
+                                            pickled_clf_arr,
+                                            method=dict_req["train_dist_method"])
+
+                                    # This last worker contains the aggregated ML model
+                                    last_worker = df.last_worker()
+                                    print("last worker:{}".format(df.last_worker()))
+                                    str_model_accs = (", ").join(dist_model_accs)
+                                    print(str_model_accs)
+                                    print(type(str_model_accs))
+                                    # TODO: Inform Client so it can just trigger classification if needed
+                                    reply = [client_addr,
+                                            b"TRAIN_RESP_DONE",
+                                            encode(last_worker),
+                                            time_done,
+                                            encode(str_model_accs)]
+                                    frontend.send_multipart(reply)
+
+                                    # ~~~~~~~~~~~~~~~ # solely for validation purposes
+                                    print("Dist aggregated pickles len: {}".format(len(aggregated_pickles)))
+                                    print("Dist aggregated pickle[0] shape: {}".format(aggregated_pickles[0].shape))
+
+                                    dict_req = {}
+                                    dict_req["sender"] = decode(client_addr)
+                                    dict_req["command"] = PPP_CLSFY
+                                    dict_req["req_time"] = current_seconds_time()
+                                    dict_req["model"] = 'RandomForest'
+                                    classify_query = json.dumps(dict_req)
+
+                                    df = DistributionFactory("RND-CENTRAL")
+                                    df.distributor.select_worker(last_worker)
+                                    df.distribute(backend, 
+                                            workers.queue, 
+                                            classify_query, #CHANGE
+                                            aggregated_pickles,
+                                            method=None)
+                                    aggregated_pickles = []
+
+                        elif dict_req["train_dist_method"] == CENTRALIZED:
+                            zipped_pickled_model = msg[9]
+                            aggregated_pickles = []
+
+                            unzipped = blosc.decompress(zipped_pickled_model)
+                            clf = pickle.loads(unzipped)
+
+                            print("Done in {}".format(decode(time_done)))
+                            print("C Clf:{}".format(clf))
+                            reply = [client_addr,
+                                    b"TRAIN_RESP",
+                                    worker_addr,
+                                    time_done,
+                                    msg[8]]
+                            frontend.send_multipart(reply)
+
+                        # TODO: Need to distribute again if the number of 
+                        # tasks has not finished, and then have another if statement like line: 313
+                        # To aggregate all trees. This needs to be fixed so that even for centralized
+                        # method it should work.
+                        # parsed_query = json.dumps(dict_req)
+                        # df.distribute(backend, 
+                        #                 workers.queue, 
+                        #                 [parsed_query], 
+                        #                 aggregated_pickles)
                         pass
+
                     if flag == PPP_CLSFY:
                         rows_classified = msg[6]
                         classifications = msg[7]
@@ -354,21 +557,31 @@ def main():
                 # IF client is DEALER
                 client_addr, query = frontend.recv_multipart()
 
+                # json_req = parse_broker_message(query)
+
+                # if json_req['command'] == "TRAIN"
                 # For generating secondary tasks (either classify, train or classify then train)
-                parsed_query = accept_task(client_addr, query)
-
-                print("Secondary task:{}".format(parsed_query))
-
+                # parsed_query = accept_task(client_addr, query)
+                
                 # For generating tasks for all workers (initial task)
                 tc = TaskCreator.TaskCreator(query)
-                GLOBAL_TASK_LIST.extend(tc.parse_request())
+
+                # TODO: Refactor, global task list is extract task...
+                tasks_array = tc.parse_request()
+
+                GLOBAL_TASK_LIST.extend(tasks_array["EXTRACT"])
+
+                # TODO: Refactor, parsed query is secondary task (train)
+                parsed_query = tasks_array["TRAIN"]
+                print("Secondary task:{}".format(parsed_query))
+
                 tasks_received = len(GLOBAL_TASK_LIST)
 
                 if __debug__:
                     print("TASKS:{}".format(GLOBAL_TASK_LIST))
 
                 df = DistributionFactory("RND")
-                df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, None)
+                df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, extra=None, method=None)
 
                 if __debug__:
                     print(workers.queue, GLOBAL_TASK_LIST)
