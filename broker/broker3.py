@@ -168,13 +168,13 @@ class RandomDistribution(object):
                 elif method == 'AGGREGATE_MODELS':
                     pass
 
-                print("Len of extra remaining:{}".format(len(extra)))
+                # print("Len of extra remaining:{}".format(len(extra)))
                 backend_socket.send_multipart(message)
                 
             tasks.remove(rtask)
             self.last_worker = worker
             workers.pop(worker, None)
-            print("Len of tasks remaining:{}".format(len(tasks)))
+            # print("Len of tasks remaining:{}".format(len(tasks)))
 
     def last_worker(self):
         return self.last_worker
@@ -269,6 +269,11 @@ def zip_and_pickle(obj, flags=0, protocol=-1):
     p = pickle.dumps(obj, protocol)
     z = blosc.compress(p, typesize=8)
     return z
+
+def unpickle_and_unzip(pickled):
+    unzipped = blosc.decompress(pickled)
+    unpickld = pickle.loads(unzipped)
+    return unpickld
 
 def main():
     url_client = "tcp://*:{}".format(FRONTEND_PORT)
@@ -522,8 +527,22 @@ def main():
                             frontend.send_multipart(reply)
 
                     if flag == PPP_CLSFY:
-                        rows_classified = msg[6]
-                        classifications = msg[7]
+                        message = decode(msg[6])
+                        time_finished = decode(msg[7])
+                        model_accuracy = decode(msg[8])
+                        predictions = msg[9]
+
+                        unzipped_predictions = unpickle_and_unzip(predictions)
+                        print("Received from worker: {} on {} with acc: {}".format(message, time_finished, model_accuracy))
+                        print(unzipped_predictions)
+
+                        reply = [client_addr,
+                                b"CLSFY_RESP",
+                                worker_addr,
+                                msg[7],
+                                msg[8],
+                                predictions]
+                        frontend.send_multipart(reply)
                         pass
 
             if socks.get(heartbeat) == zmq.POLLIN:
@@ -541,6 +560,18 @@ def main():
                 if __debug__:
                     print("HB:{}".format(workers.queue.keys()))
 
+            # TODO: Specify here a flag/branch for when classify is triggered by the client
+            ''' 
+                - must check if the workers have a model (future task)
+                - raw data must come from the client in chunks (what about queueing?)
+                - data must be feature extracted and classified in chunks as well
+                - metrics from query, collection(?), processing and aggregation
+                - separate workers for classifying and training... (depending on speeds)
+                - required number of chunks for features to be extracted -> 128 (window size)
+                - ask nakamura, how label is set? -> labels.txt (chunks here equivalent to label on .txt file)
+                - if model is found, just extract then classify (continuously?)..., else extract -> train -> classify
+                - (future) while classifying, also train and see if accuracy will increase????
+            '''
             if socks.get(frontend) == zmq.POLLIN:
                 aggregated_pickles = []
                 GLOBAL_TASK_LIST = []

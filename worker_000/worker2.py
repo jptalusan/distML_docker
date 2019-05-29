@@ -142,7 +142,7 @@ class RandomForest(object):
             print(X.shape)
             print(y.shape)
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=None)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=100)
 
         if __debug__:
             print(X_train.shape)
@@ -150,12 +150,12 @@ class RandomForest(object):
             print(X_test.shape)
             print(y_test.shape)
 
-        sc = StandardScaler()
-        # https://stackoverflow.com/questions/48692500/fit-transform-on-training-data-and-transform-on-test-data
-        X_train = sc.fit_transform(X_train)
-        X_test = sc.transform(X_test)
+        # sc = StandardScaler()
+        # # https://stackoverflow.com/questions/48692500/fit-transform-on-training-data-and-transform-on-test-data
+        # X_train = sc.fit_transform(X_train)
+        # X_test = sc.transform(X_test)
 
-        self.classifier = RandomForestClassifier(n_estimators=20, random_state=None)  
+        self.classifier = RandomForestClassifier(n_estimators=20, random_state=100)  
         self.classifier.fit(X_train, y_train.ravel())  
         y_pred = self.classifier.predict(X_test)  
 
@@ -246,7 +246,7 @@ class Worker(object):
                         # print("After label: ", numpy_arr.shape)
                         # print("WR: done working...")
 
-                        print("After sending:", psutil.cpu_percent(interval=None, percpu=False))
+                        # print("After sending:", psutil.cpu_percent(interval=None, percpu=False))
                         print("After sending:", psutil.cpu_percent(interval=None, percpu=True))
                         socket.send_multipart([PPP_TASKS,
                                             PPP_CAPAB_PI,
@@ -257,7 +257,7 @@ class Worker(object):
                                             b"Some other data...",
                                             zipped])
                     else:
-                        print("Failed feature extraction.")
+                        print("Failed feature extraction. Chunk too small (<128)")
                 elif command == PPP_TRAIN:
                     print(json_req['command'])
                     pickle_arr = message_from_router[1:]
@@ -316,13 +316,13 @@ class Worker(object):
                     X = np_output[:,:-1]
                     y = np_output[:,-1:]
 
-                    X_train, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=None)
+                    X_train, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=100)
 
 
                     # TODO: It fails without this, how do I do machine learning?!
-                    sc = StandardScaler()
-                    X_train = sc.fit_transform(X_train)
-                    X_test = sc.transform(X_test)
+                    # sc = StandardScaler()
+                    # X_train = sc.fit_transform(X_train)
+                    # X_test = sc.transform(X_test)
 
                     clf = load('combined_rf_model.joblib') 
                     y_pred = clf.predict(X_test)  
@@ -331,6 +331,19 @@ class Worker(object):
                     print(classification_report(y_test, y_pred))
                     acc = accuracy_score(y_test, y_pred)
                     print("accuracy:{}".format(acc))
+                    print("final CLF: {}".format(clf))
+
+                    pickled_y_pred = zip_and_pickle(y_pred)
+
+                    socket.send_multipart([PPP_TASKS,
+                                           PPP_CAPAB_PI,
+                                           PPP_FREE,
+                                           encode(PPP_CLSFY),
+                                           encode(client_addr),
+                                           b"Im done with Classifying...",
+                                           encode(str(current_seconds_time())),
+                                           encode(str(acc)),
+                                           pickled_y_pred])
                     # ~~~~~~~~~~~~~~~# END
                     pass
 
