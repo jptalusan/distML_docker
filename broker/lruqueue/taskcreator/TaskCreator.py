@@ -11,6 +11,8 @@ PPP_CLSFY = os.environ['PPP_CLSFY']
 class TaskCreator(object):
     def __init__(self, client_request):
         self.client_request = client_request
+        print(self.client_request)
+        print("TC Type:", (type(self.client_request)))
 
     def generate_extract_task_queue(self, json_request):
         # we get the total number of workers from heartbeat
@@ -73,12 +75,7 @@ class TaskCreator(object):
         return json.dumps(broker_req)
 
     def parse_request(self):
-        str_request = self.client_request.decode('ascii')
-        #  Parse JSON Request
-        json_request = json.loads(str_request)
-        json_request = json.loads(json_request)
-        print(json_request)
-
+        json_request = self.client_request
         # print(type(json_request))
         tasks = {}
         
@@ -91,6 +88,7 @@ class TaskCreator(object):
             tasks["EXTRACT"] = self.generate_extract_task_queue(json_request)
             tasks["TRAIN"] = self.generate_train_task_queue(json_request)
 
+        # TODO: Limit this to when there are no models present... or initial run?
         else:
             tasks["EXTRACT"] = self.generate_extract_task_queue(json_request)
             tasks["TRAIN"] = self.generate_train_task_queue(json_request)

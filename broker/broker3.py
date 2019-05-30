@@ -109,21 +109,36 @@ class ByCapacity(object):
 class RandomDistributionCentralized(object):
     def distribute(self, backend_socket, workers, task, extra, method=None):
         workers.pop(self.selected_worker, None)
-        message = [encode(self.selected_worker), 
-                encode(task)]
-        message.extend(extra)
-        backend_socket.send_multipart(message)
+
+        # TODO: FUCK SOBRANG JANKY!
+        if isinstance(extra, (list)):
+            message = [encode(self.selected_worker), 
+                    encode(task)]
+            message.extend(extra)
+            backend_socket.send_multipart(message)
+        elif isinstance(extra, (bytes)):
+            message = [encode(self.selected_worker), 
+                    encode(task),
+                    extra]
+            backend_socket.send_multipart(message)
         self.last_worker = self.selected_worker
+
     def next(self):
         pass
     
     def last_worker(self):
         return self.last_worker
 
-    def select_worker(self, worker_address):
-        self.selected_worker = worker_address
-    
-class RandomDistributionDistributed(object):
+    # TODO: Fix for the other function using this...
+    def select_worker(self, workers, worker_address=None):
+        if worker_address is not None:
+            self.selected_worker = worker_address
+        else:
+            print("Keys:", workers.keys())
+            self.selected_worker = list(workers.keys())[0]
+
+# TODO: Just create a class that sends data to worker (since it is streamed by another machine/client...)
+class RandomDistributionStreamedData(object):
     pass
 
 # Should I multiprocess this? But the tasklist is only a single item, it might cause problems...
@@ -325,8 +340,10 @@ def main():
                     flag = decode(msg[4])
                     client_addr = msg[5]
 
-                    if flag not in (PPP_READY, PPP_TASKS, PPP_XTRCT, PPP_TRAIN, PPP_CLSFY):
-                        print("E: Invalid flag from worker: %s" % decode(flag))
+                    # TODO: Just testing something, but may add for future the last flag (new)
+                    # if flag not in (PPP_READY, PPP_TASKS, PPP_XTRCT, PPP_TRAIN, PPP_CLSFY):
+                    if flag not in (PPP_READY, PPP_TASKS, PPP_XTRCT, PPP_TRAIN, PPP_CLSFY, "CLASSIFY_STREAM_ONLY"):
+                        print("E: Invalid flag from worker: %s" % flag)
                     else: # Try to change to some result flag
                         # Send to frontend? or perform more tasks
                         pass
@@ -337,10 +354,11 @@ def main():
 
                         extraction_tasks_processed_by_worker += 1
 
-                        unzipped = blosc.decompress(pickled)
-                        unpickld = pickle.loads(unzipped)
+                        if __debug__:
+                            unzipped = blosc.decompress(pickled)
+                            unpickld = pickle.loads(unzipped)
 
-                        print("Unpickled shape: {}".format(unpickld.shape))
+                            print("Unpickled shape: {}".format(unpickld.shape))
                         aggregated_pickles.append(pickled)
                         
                         curr_time = str(current_seconds_time())
@@ -502,7 +520,7 @@ def main():
                                     classify_query = json.dumps(dict_req)
 
                                     df = DistributionFactory("RND-CENTRAL")
-                                    df.distributor.select_worker(last_worker)
+                                    df.distributor.select_worker(workers.queue, last_worker)
                                     df.distribute(backend, 
                                             workers.queue, 
                                             classify_query, #CHANGE
@@ -545,6 +563,22 @@ def main():
                         frontend.send_multipart(reply)
                         pass
 
+                    if flag == "CLASSIFY_STREAM_ONLY":
+                        print("Returned classify stream")
+                        message = decode(msg[6])
+                        time_finished = decode(msg[7])
+                        predictions = msg[8]
+                        print("Client:{}".format(client_addr))
+                        print("time:{}".format(time_finished))
+                        print("Preds:{}".format(unpickle_and_unzip(predictions)))
+                        reply = [b"Client-000",#client_addr,
+                        # reply = [client_addr,
+                                b"CLASSIFY_STREAM_ONLY_RESP",
+                                worker_addr,
+                                msg[7],
+                                predictions]
+                        frontend.send_multipart(reply)
+
             if socks.get(heartbeat) == zmq.POLLIN:
                 # Update the worker queue
                 msg = heartbeat.recv_multipart()
@@ -583,37 +617,76 @@ def main():
                 # IF client is REQ
                 # client_addr, _, query = frontend.recv_multipart()
                 # IF client is DEALER
-                client_addr, query = frontend.recv_multipart()
+                # client_addr, query = frontend.recv_multipart()
 
-                # json_req = parse_broker_message(query)
+                query = frontend.recv_multipart()
+                client_addr = query[0]
 
-                # if json_req['command'] == "TRAIN"
-                # For generating secondary tasks (either classify, train or classify then train)
-                # parsed_query = accept_task(client_addr, query)
-                
-                # For generating tasks for all workers (initial task)
-                tc = TaskCreator.TaskCreator(query)
+                json_req = json.loads(decode(query[1]))
+                print("Query type: {}".format(type(query)))
+                # print("Query: {}".format(query))
+                print(len(query))
+                print(json_req)
+                print(type(json_req))
 
-                # TODO: Refactor, global task list is extract task...
-                tasks_array = tc.parse_request()
+                # ~~~~~~~~~ CLASSIFY ONLY ~~~~~~~~~~~~~~ #
+                # TODO: Must add which 'acc' or 'gyro' is needed...
+                # Hard coded worker - since im lazy (for now) centralized ML classification
+                if json_req['command'] == PPP_CLSFY:
+                    print("Received some classification task...")
+                    pickled_chunk = query[2:]
 
-                GLOBAL_TASK_LIST.extend(tasks_array["EXTRACT"])
+                    dict_req = {}
+                    dict_req["sender"] = decode(client_addr)
+                    dict_req["command"] = "EXTRACT-CLASSIFY"
+                    dict_req["req_time"] = current_seconds_time()
+                    dict_req["model"] = 'RandomForest'
+                    dict_req["database"] = json_req["database"]
+                    classify_query = json.dumps(dict_req)
+                    
+                    print("Classify query: {}".format(classify_query))
+                    # TODO: When no workers are available, either queue incoming data (which might be too much)
+                    # or drop it, then measured the percentages of dropped vs success/sent
+                    if len(workers.queue) > 0:
+                        df = DistributionFactory("RND-CENTRAL")
+                        df.distributor.select_worker(workers.queue, worker_address=None)
+                        df.distribute(backend, 
+                                workers.queue, 
+                                classify_query,
+                                extra=pickled_chunk,
+                                method=None)
+                    else:
+                        print("Dropped streamed data since cannot accomodate...")
+                # ~~~~~~~~~~~~~~~~~~~~~~~ #
 
-                # TODO: Refactor, parsed query is secondary task (train)
-                parsed_query = tasks_array["TRAIN"]
-                print("Secondary task:{}".format(parsed_query))
+                elif json_req['command'] == PPP_TRAIN:
+                    # if json_req['command'] == "TRAIN"
+                    # For generating secondary tasks (either classify, train or classify then train)
+                    # parsed_query = accept_task(client_addr, query)
+                    
+                    # For generating tasks for all workers (initial task)
+                    tc = TaskCreator.TaskCreator(json_req)
 
-                tasks_received = len(GLOBAL_TASK_LIST)
+                    # TODO: Refactor, global task list is extract task...
+                    tasks_array = tc.parse_request()
 
-                if __debug__:
-                    print("TASKS:{}".format(GLOBAL_TASK_LIST))
+                    GLOBAL_TASK_LIST.extend(tasks_array["EXTRACT"])
 
-                df = DistributionFactory("RND")
-                df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, extra=None, method=None)
+                    # TODO: Refactor, parsed query is secondary task (train)
+                    parsed_query = tasks_array["TRAIN"]
+                    print("Secondary task:{}".format(parsed_query))
 
-                if __debug__:
-                    print(workers.queue, GLOBAL_TASK_LIST)
-                pass
+                    tasks_received = len(GLOBAL_TASK_LIST)
+
+                    if __debug__:
+                        print("TASKS:{}".format(GLOBAL_TASK_LIST))
+
+                    df = DistributionFactory("RND")
+                    df.distribute(backend, workers.queue, GLOBAL_TASK_LIST, extra=None, method=None)
+
+                    if __debug__:
+                        print(workers.queue, GLOBAL_TASK_LIST)
+                    pass
             else:
                 # How will I attempt to send heartbeat here?
                 # I think itonly triggers every second, the poll rate

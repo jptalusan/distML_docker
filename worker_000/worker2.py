@@ -21,6 +21,7 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 import psutil
 import functools
 from joblib import dump, load
+from feature_extraction import feature_extraction_separate, feature_extraction
 
 decode = lambda x: x.decode('utf-8')
 encode = lambda x: x.encode('ascii')
@@ -98,6 +99,35 @@ def zip_and_pickle(obj, flags=0, protocol=-1):
     p = pickle.dumps(obj, protocol)
     z = blosc.compress(p, typesize=8)
     return z
+
+def unpickle_and_unzip(pickled):
+    unzipped = blosc.decompress(pickled)
+    unpickld = pickle.loads(unzipped)
+    return unpickld
+    
+def extract_features_from_raw_data(meas, raw_np_arr, raw_np_arr_2=None):
+    window = 128
+    slide = 64
+    fs = 50.0
+
+    if meas == 'acc':
+        tAcc_XYZ = raw_np_arr
+        n_features = feature_extraction_separate.compute_all_Acc_features(
+            tAcc_XYZ, window, slide, fs)
+        temp = n_features.tolist()
+    elif meas == 'gyro':
+        tGyr_XYZ = raw_np_arr
+        n_features = feature_extraction_separate.compute_all_Gyr_features(
+            tGyr_XYZ, window, slide, fs)
+        temp = n_features.tolist()
+    elif meas == 'both':
+        tAcc_XYZ = raw_np_arr
+        tGyr_XYZ = raw_np_arr_2
+        all_feat_np = feature_extraction.compute_all_features(
+            tAcc_XYZ, tGyr_XYZ, 
+            window, slide, fs)
+        temp = all_feat_np.tolist()
+    return np.asarray(temp)
 
 def extract_features(label, database, limit):
     dbs = database_specific.Database_Specific(INFLUX_HOST, INFLUX_PORT, INFLUX_DB)
@@ -264,12 +294,6 @@ class Worker(object):
 
                     print("number of pickles received: {}".format(len(pickle_arr)))
                     np_output = split_aggregated_feature_extracted(pickle_arr)
-                    # for pickled in pickle_arr:
-                    #     unzipped = blosc.decompress(pickled)
-                    #     unpickld = pickle.loads(unzipped)
-                    #     temp = unpickld.tolist()
-                    #     output.extend(temp)
-                    # np_output = np.asarray(output)
                     print(np_output.shape)
 
                     # TODO: Should I clear this each time? a new message arrives?
@@ -325,7 +349,7 @@ class Worker(object):
                     # X_test = sc.transform(X_test)
 
                     clf = load('combined_rf_model.joblib') 
-                    y_pred = clf.predict(X_test)  
+                    y_pred = clf.predict(X_test)
 
                     print(confusion_matrix(y_test, y_pred))
                     print(classification_report(y_test, y_pred))
@@ -346,6 +370,36 @@ class Worker(object):
                                            pickled_y_pred])
                     # ~~~~~~~~~~~~~~~# END
                     pass
+
+                elif command == "EXTRACT-CLASSIFY":
+                    print("EXTRACT-CLASSIFY TASK received!")
+                    pickled_arr = message_from_router[1:]
+
+                    meas = json_req["database"]
+
+                    # TODO: WOW HARDCODED
+                    if meas == 'both':
+                        np_arr = unpickle_and_unzip(pickled_arr[0])
+                        np_arr2 = unpickle_and_unzip(pickled_arr[1])
+                        output = extract_features_from_raw_data(meas, np_arr, raw_np_arr_2=np_arr2)
+                    else:
+                        np_arr = unpickle_and_unzip(pickled_arr[0])
+                        output = extract_features_from_raw_data(meas, np_arr)
+
+                    # TODO: Anyway to check if joblib load is still loaded?
+                    clf = load('combined_rf_model.joblib')
+                    y_pred = clf.predict(output)
+                    pickled_y_pred = zip_and_pickle(y_pred)
+                    
+                    print("Extracted:{}".format(output.shape))
+                    socket.send_multipart([PPP_TASKS,
+                                           PPP_CAPAB_PI,
+                                           PPP_FREE,
+                                           encode("CLASSIFY_STREAM_ONLY"),
+                                           encode(client_addr),
+                                           b"Im done with Classifying...",
+                                           encode(str(current_seconds_time())),
+                                           pickled_y_pred])
 
         except zmq.ContextTerminated:
             # context terminated so quit silently
