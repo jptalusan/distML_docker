@@ -53,6 +53,7 @@ class TaskCreator(object):
         broker_req["model"] = json_request["model"]
         broker_req["train_dist_method"] = json_request['train_dist_method']
 
+        self.json_train_request = broker_req
         broker_req = json.dumps(broker_req)
         return broker_req
 

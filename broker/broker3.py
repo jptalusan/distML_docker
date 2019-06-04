@@ -401,7 +401,8 @@ def main():
                                     print(n_.shape)
                                     
                                     # TODO: The split should be prepared by request or algorithm
-                                    number_of_trainers = 5
+                                    # number_of_trainers = len(workers.queue)
+                                    number_of_trainers = 6
 
                                     n_arr = list(split(n_, number_of_trainers))
             
@@ -521,6 +522,7 @@ def main():
 
                                     df = DistributionFactory("RND-CENTRAL")
                                     df.distributor.select_worker(workers.queue, last_worker)
+                                    # df.distributor.select_worker(workers.queue, "Worker-000")
                                     df.distribute(backend, 
                                             workers.queue, 
                                             classify_query, #CHANGE
@@ -561,7 +563,16 @@ def main():
                                 msg[8],
                                 predictions]
                         frontend.send_multipart(reply)
-                        pass
+
+                        # TODO4: Just resending a heartbeat for debugging/testing/experiment
+                        for kk in range(12):
+                            worker_name = "Worker_" + "{}".format(kk).zfill(4)
+                            print("Sending a heartbeat to {}".format(worker_name))
+                            msg = [encode(worker_name), PPP_HEARTBEAT]
+                            heartbeat.send_multipart(msg)
+
+                        print(workers.queue)
+                        # TODO4 (END)
 
                     if flag == "CLASSIFY_STREAM_ONLY":
                         print("Returned classify stream")
@@ -583,6 +594,7 @@ def main():
                 # Update the worker queue
                 msg = heartbeat.recv_multipart()
                 worker_addr = msg[0]
+                # print("Received heartbeat from {}".format(decode(worker_addr)))
                 ready, capab, stats = msg[1:]
                 if ready == PPP_HEARTBEAT:
                     if __debug__:
@@ -593,6 +605,7 @@ def main():
 
                 if __debug__:
                     print("HB:{}".format(workers.queue.keys()))
+                # print("Current workers:{}".format(workers.queue))
 
             # TODO: Specify here a flag/branch for when classify is triggered by the client
             ''' 
@@ -674,6 +687,24 @@ def main():
 
                     # TODO: Refactor, parsed query is secondary task (train)
                     parsed_query = tasks_array["TRAIN"]
+
+                    # TODO5: JUst trying to limit the workers here for automation
+
+                    print(workers.queue)
+                    req_workers = json_req["workers"]
+                    print("Req workers:{}".format(req_workers))
+                    for index, key in enumerate(list(workers.queue)):
+                        if len(workers.queue) == int(req_workers):
+                            print("Done clearing some workers...")
+                            break
+                        else:
+                            del workers.queue[key]
+                            ("Deleted: {}".format(key))
+
+                    print(workers.queue)
+
+                    # TODO5 (END)
+
                     print("Secondary task:{}".format(parsed_query))
 
                     tasks_received = len(GLOBAL_TASK_LIST)

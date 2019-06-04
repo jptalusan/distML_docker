@@ -8,6 +8,7 @@ import json
 import blosc
 import pickle
 import numpy as np
+import sys
 
 NBR_CLIENTS = 1
 
@@ -26,7 +27,7 @@ def unpickle_and_unzip(pickled):
     unpickld = pickle.loads(unzipped)
     return unpickld
     
-def client_thread(client_url, i):
+def client_thread(client_url, i, rows, run, workers):
     """ Basic request-reply client using REQ socket """
     context = zmq.Context.instance()
     socket = context.socket(zmq.DEALER)
@@ -45,21 +46,27 @@ def client_thread(client_url, i):
     dict_req["sender"] = socket.identity.decode('ascii')
     dict_req["command"] = 'TRAIN'
     dict_req["req_time"] = current_seconds_time()
-    dict_req["database"] = 'acc'
+    dict_req["database"] = 'both'
     dict_req["model"] = 'RandomForest'
-    dict_req["rows"] = 128
+    dict_req["rows"] = rows
     dict_req["distribution"] = "RND"
     dict_req["train_dist_method"] = "distributed"
     # dict_req["train_dist_method"] = "centralized"
+    dict_req["workers"] = workers
 
     # dict_req = json.dumps(dict_req)
 
     # TODO: Need to not send to just get response from classification test.
-    # socket.send_json(dict_req)
+    socket.send_json(dict_req)
 
     print("I am: {}".format(socket.identity))
     start = current_seconds_time()
     print("Query sent at: {}".format(start))
+
+    filename = "extract_and_train_data-{}-{}.txt".format(run, rows)
+    
+    file = open(filename,"a") 
+    file.write("Run: {}, Rows: {}, Workers: {}\n".format(run, rows, workers))
     try:
       while True:
         reply = socket.recv_multipart()
@@ -69,6 +76,8 @@ def client_thread(client_url, i):
         if reply[0] == b"XTRACT_RESP":
             # print("{} finished extracting at {}".format(decode(reply[1]), decode(reply[2])))
             print("{} finished extracting in {} secs".format(decode(reply[1]), elapse_t))
+
+            file.write("{} finished extracting in {} secs\n".format(decode(reply[1]), elapse_t))
         elif reply[0] == b"TRAIN_RESP":
             # print("{} finished training at {}, accuracy: {}".format(decode(reply[1]), 
             #                                                         decode(reply[2]),
@@ -80,12 +89,23 @@ def client_thread(client_url, i):
             print("{} finished dist training in {} secs, w/ accuracies: {}".format(decode(reply[1]), 
                                                                     elapse_t,
                                                                     decode(reply[3])))
+
+            file.write("{} finished dist training in {} secs, w/ accuracies: {}\n".format(decode(reply[1]), 
+                                                                    elapse_t,
+                                                                    decode(reply[3])))
         elif reply[0] == b"CLSFY_RESP":
             print("{} finished classification in {} secs, w/ accuracies: {}".format(decode(reply[1]), 
                                                                     elapse_t,
                                                                     decode(reply[3])))
             print("Classifications:{}".format(unpickle_and_unzip(reply[4])))
 
+
+            file.write("{} finished classification in {} secs, w/ accuracies: {}\n".format(decode(reply[1]), 
+                                                                    elapse_t,
+                                                                    decode(reply[3])))
+            file.write("Classifications:{}\n".format(unpickle_and_unzip(reply[4])))
+            file.close() 
+            return None
         elif reply[0] == b"CLASSIFY_STREAM_ONLY_RESP":
             print("{} classified in {} secs: [{}]".format(decode(reply[1]), 
                                                                     elapse_t,
@@ -111,6 +131,7 @@ def client_thread(client_url, i):
             print(np_output.shape)
 
             print(current_seconds_time() - start)
+            
     except zmq.ContextTerminated:
       return
 
@@ -119,9 +140,12 @@ def main():
   url_client = "tcp://163.221.125.55:7000"
   #context = zmq.Context()
 
+  #   Adding some parameters args for automation
+
+  print(sys.argv[1], sys.argv[2], sys.argv[3])
   for i in range(NBR_CLIENTS):
     thread_c = threading.Thread(target=client_thread,
-                                args=(url_client, i, ))
+                                args=(url_client, i, sys.argv[1], sys.argv[2], sys.argv[3]))
     #thread_c.daemon = True
     thread_c.start()
   

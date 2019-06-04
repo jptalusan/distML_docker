@@ -82,8 +82,8 @@ class Heartbeat(object):
                 if socks.get(socket) == zmq.POLLIN:
                     frames = socket.recv_multipart()
                     
+                    # print("Received HB")
                     if __debug__:
-                        print("Received HB")
                         print(psutil.cpu_percent(interval=None, percpu=False))
                         print(psutil.cpu_percent(interval=None, percpu=True))
                     socket.send_multipart([PPP_HEARTBEAT,

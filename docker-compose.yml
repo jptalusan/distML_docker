@@ -1,5 +1,7 @@
-version: "3.2"
+# version: "3.2"
+version: "2.2"
 services:
+
   worker_000:
     build: ./worker_000/
     volumes:
@@ -12,8 +14,9 @@ services:
     env_file: 
       - hosts.env
       - constants.env
-    # cpu_percent: 10
-    # cpus: 0.2
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
   worker_001:
     build: ./worker_000/
@@ -27,6 +30,9 @@ services:
     env_file: 
       - hosts.env
       - constants.env
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
   
   worker_002:
     build: ./worker_000/
@@ -40,123 +46,153 @@ services:
       - constants.env
     depends_on: 
       - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_003:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0003
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_003:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0003
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_004:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0004
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_004:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0004
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_005:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0005
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_005:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0005
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_006:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0006
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_006:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0006
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_007:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0007
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_007:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0007
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_008:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0008
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_008:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0008
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_009:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0009
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_009:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0009
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_010:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0010
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_010:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0010
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
-  # worker_011:
-  #   build: ./worker_000/
-  #   volumes:
-  #     - ./worker_000:/usr/src/app
-  #   environment: 
-  #     - PYTHONUNBUFFERED=1
-  #     - WORKER_ID=0011
-  #   env_file: 
-  #     - hosts.env
-  #     - constants.env
-  #   depends_on: 
-  #     - broker
+  worker_011:
+    build: ./worker_000/
+    volumes:
+      - ./worker_000:/usr/src/app
+    environment: 
+      - PYTHONUNBUFFERED=1
+      - WORKER_ID=0011
+    env_file: 
+      - hosts.env
+      - constants.env
+    depends_on: 
+      - broker
+    cpu_percent: 10 #"2.2"
+    cpus: 0.1 #"2.2"
+    mem_limit: 1g #"2.2"
 
   broker:
     build: ./broker/
