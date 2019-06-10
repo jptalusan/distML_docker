@@ -14,6 +14,7 @@ import blosc
 import pickle
 import numpy as np
 from itertools import repeat
+from time import gmtime, strftime
 
 import sklearn
 from sklearn.ensemble import RandomForestClassifier
@@ -110,16 +111,33 @@ class RandomDistributionCentralized(object):
     def distribute(self, backend_socket, workers, task, extra, method=None):
         workers.pop(self.selected_worker, None)
 
+        # TODO: Data recorder lang yun.
+        date_time_str = strftime("%Y-%m-%d %H:00:00", gmtime())
+        filename = "extract_and_train_data-{}.txt".format(date_time_str)
+
+        file = open(filename,"a") 
+        
         # TODO: FUCK SOBRANG JANKY!
         if isinstance(extra, (list)):
             message = [encode(self.selected_worker), 
                     encode(task)]
             message.extend(extra)
+
+            file.write("Task sent to backend: {}\n".format(task))
+            total_bytes = 0
+            for each_extra in extra:
+                total_bytes += len(each_extra)
+
+            file.write("Task bytes size: {}\n".format(total_bytes))
             backend_socket.send_multipart(message)
         elif isinstance(extra, (bytes)):
             message = [encode(self.selected_worker), 
                     encode(task),
                     extra]
+
+            file.write("Task sent to backend: {}\n".format(task))
+
+            file.write("Task bytes size: {}\n".format(len(extra)))
             backend_socket.send_multipart(message)
         self.last_worker = self.selected_worker
 
@@ -158,16 +176,31 @@ class RandomDistribution(object):
             global tasks_sent
             tasks_sent += 1
             if extra == None:
+    
+                date_time_str = strftime("%Y-%m-%d %H:00:00", gmtime())
+                filename = "extract_and_train_data-{}.txt".format(date_time_str)
+
+                file = open(filename,"a") 
+                file.write("Task sent to backend: {}\n".format(rtask))
+
                 backend_socket.send_multipart([encode(worker),
                                                encode(rtask)])
                 print("Query {} sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
             else:
                 # TODO: Must differentiate between centralized and distributed here as well
                 # Distributed
+
+                date_time_str = strftime("%Y-%m-%d %H:00:00", gmtime())
+                filename = "extract_and_train_data-{}.txt".format(date_time_str)
+
+                file = open(filename,"a") 
+                file.write("Task sent to backend: {}\n".format(rtask))
+
                 if method == DISTRIBUTED:
                     message = [encode(worker), 
                             encode(rtask),
                             extra[ind]]
+                    file.write("Task bytes size: {}\n".format(len(extra[ind])))
                     print("D Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
                     # backend_socket.send_multipart(message)
                     extra.remove(extra[ind])
@@ -178,6 +211,7 @@ class RandomDistribution(object):
                     message = [encode(worker), 
                             encode(rtask)]
                     message.extend(extra)
+                    file.write("Task bytes size: {}\n".format(len(extra)))
                     print("C Query {} with extra sent to {} at {}".format(tasks_sent, worker, str(current_seconds_time())))
                     
                 elif method == 'AGGREGATE_MODELS':
@@ -352,6 +386,11 @@ def main():
                         resp1, resp2 = msg[5:7]
                         pickled = msg[8]
 
+                        date_time_str = strftime("%Y-%m-%d %H:00:00", gmtime())
+                        filename = "extract_and_train_data-{}.txt".format(date_time_str)
+        
+                        file = open(filename,"a")
+                        file.write("Received from {}, sized: {}\n".format(worker_addr, len(pickled)))
                         extraction_tasks_processed_by_worker += 1
 
                         if __debug__:
@@ -565,7 +604,7 @@ def main():
                         frontend.send_multipart(reply)
 
                         # TODO4: Just resending a heartbeat for debugging/testing/experiment
-                        for kk in range(12):
+                        for kk in range(24):
                             worker_name = "Worker_" + "{}".format(kk).zfill(4)
                             print("Sending a heartbeat to {}".format(worker_name))
                             msg = [encode(worker_name), PPP_HEARTBEAT]
@@ -673,6 +712,11 @@ def main():
                 # ~~~~~~~~~~~~~~~~~~~~~~~ #
 
                 elif json_req['command'] == PPP_TRAIN:
+                    date_time_str = strftime("%Y-%m-%d %H:00:00", gmtime())
+                    filename = "extract_and_train_data-{}.txt".format(date_time_str)
+    
+                    file = open(filename,"a") 
+
                     # if json_req['command'] == "TRAIN"
                     # For generating secondary tasks (either classify, train or classify then train)
                     # parsed_query = accept_task(client_addr, query)
@@ -694,7 +738,7 @@ def main():
                     req_workers = json_req["workers"]
                     print("Req workers:{}".format(req_workers))
                     for index, key in enumerate(list(workers.queue)):
-                        if len(workers.queue) == int(req_workers):
+                        if len(workers.queue) <= int(req_workers):
                             print("Done clearing some workers...")
                             break
                         else:
@@ -702,7 +746,6 @@ def main():
                             ("Deleted: {}".format(key))
 
                     print(workers.queue)
-
                     # TODO5 (END)
 
                     print("Secondary task:{}".format(parsed_query))
