@@ -136,14 +136,14 @@ def client_thread(client_url, i, rows, run, workers):
       return
 
 def main():
-
-  url_client = "tcp://163.221.125.55:7000"
+  url_client = "tcp://localhost:7000"
   #context = zmq.Context()
 
   #   Adding some parameters args for automation
 
   print(sys.argv[1], sys.argv[2], sys.argv[3])
   for i in range(NBR_CLIENTS):
+    #(rows, run, workers))
     thread_c = threading.Thread(target=client_thread,
                                 args=(url_client, i, sys.argv[1], sys.argv[2], sys.argv[3]))
     #thread_c.daemon = True
