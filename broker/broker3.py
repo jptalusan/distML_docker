@@ -489,69 +489,22 @@ def main():
 
                         print("Flag {} executed with response: {}".format(flag, response))
 
+                        # TODO: Here is where i execute the distributed training but only getting the DT prediction array (no models)
+                        # Not yet implemeneted
+                        # START OF IDEA (DT prediction)
                         if dict_req["train_dist_method"] == DISTRIBUTED:
                             training_tasks_processed_by_worker += 1
-                            model_accuracy = msg[8]
-                            zipped_pickled_model = msg[9]
-                            
-                            # TODO: Get the ML models here for aggregation.
-                            # Put into array and send into a single centralized compiler (not trainer)
-                            
-                            pickled_clf_arr.append(zipped_pickled_model)
-                            dist_model_accs.append(decode(model_accuracy))
-
-                            # TODO: Store array of accuracies as well?
+                            # model_accuracy = msg[8]
                             if secondary_queries:
                                 df = DistributionFactory("RND")
-                                df.distribute(backend, 
-                                            workers.queue, 
-                                            secondary_queries, 
-                                            split_pickles_arr,
-                                            method=dict_req["train_dist_method"])
+                                df.distribute(backend,
+                                              workers.queue,
+                                              secondary_queries,
+                                              split_pickles_arr,
+                                              method=dict_req["train_dist_method"])
                             else:
-                                # TODO: Sobrang janky nito kadire
-                                # TODO: Need to clear some variables...
                                 if training_tasks_processed_by_worker == number_of_trainers:
-                                    print("Just need to aggregate here...")
-                                    number_of_trainers = 0
-                                    print("Len of pickled arr: {}".format(len(pickled_clf_arr)))
-
-                                    # TODO: Generate one more task to aggregate the models.
-                                    # TODO: Need to test them
-                                    dict_req = {}
-                                    dict_req["sender"] = decode(client_addr)
-                                    dict_req["command"] = "AGGREGATE_MODELS"
-                                    dict_req["req_time"] = current_seconds_time()
-                                    dict_req["model"] = 'RandomForest'
-                                    dict_req["train_dist_method"] = CENTRALIZED
-                                    tertiary_query = json.dumps(dict_req)
-                                    df = DistributionFactory("RND")
-                                    df.distribute(backend, 
-                                            workers.queue, 
-                                            [tertiary_query], 
-                                            pickled_clf_arr,
-                                            method=dict_req["train_dist_method"])
-
-                                    # This last worker contains the aggregated ML model
-                                    last_worker = df.last_worker()
-                                    print("last worker:{}".format(df.last_worker()))
-                                    str_model_accs = (", ").join(dist_model_accs)
-                                    print(str_model_accs)
-                                    print(type(str_model_accs))
-                                    # TODO: Inform Client so it can just trigger classification if needed
-                                    reply = [client_addr,
-                                            b"TRAIN_RESP_DONE",
-                                            encode(last_worker),
-                                            time_done,
-                                            encode(str_model_accs)]
-                                    frontend.send_multipart(reply)
-
-                                    # ~~~~~~~~~~~~~~~ # solely for validation purposes
-                                    print("Dist aggregated pickles len: {}".format(len(aggregated_pickles)))
-
-                                    # feat_extd_data = split_aggregated_feature_extracted(aggregated_pickles)
-                                    # print("Dist aggregated pickle[0] shape: {}".format(feat_extd_data.shape))
-
+                                    # TODO: Must pass some rowID so i have an idea when it returns which is which
                                     dict_req = {}
                                     dict_req["sender"] = decode(client_addr)
                                     dict_req["command"] = PPP_CLSFY
@@ -569,6 +522,92 @@ def main():
                                             method=None)
                                     aggregated_pickles = []
 
+                                    pass
+
+                        # END OF IDEA
+
+                        # START OF COMMENT OUT
+                        # if dict_req["train_dist_method"] == DISTRIBUTED:
+                        #     training_tasks_processed_by_worker += 1
+                        #     model_accuracy = msg[8]
+                        #     zipped_pickled_model = msg[9]
+                            
+                        #     # TODO: Get the ML models here for aggregation.
+                        #     # Put into array and send into a single centralized compiler (not trainer)
+                            
+                        #     pickled_clf_arr.append(zipped_pickled_model)
+                        #     dist_model_accs.append(decode(model_accuracy))
+
+                        #     # TODO: Store array of accuracies as well?
+                        #     if secondary_queries:
+                        #         df = DistributionFactory("RND")
+                        #         df.distribute(backend, 
+                        #                     workers.queue, 
+                        #                     secondary_queries, 
+                        #                     split_pickles_arr,
+                        #                     method=dict_req["train_dist_method"])
+                        #     else:
+                        #         # TODO: Sobrang janky nito kadire
+                        #         # TODO: Need to clear some variables...
+                        #         if training_tasks_processed_by_worker == number_of_trainers:
+                        #             print("Just need to aggregate here...")
+                        #             number_of_trainers = 0
+                        #             print("Len of pickled arr: {}".format(len(pickled_clf_arr)))
+
+                        #             # TODO: Generate one more task to aggregate the models.
+                        #             # TODO: Need to test them
+                        #             dict_req = {}
+                        #             dict_req["sender"] = decode(client_addr)
+                        #             dict_req["command"] = "AGGREGATE_MODELS"
+                        #             dict_req["req_time"] = current_seconds_time()
+                        #             dict_req["model"] = 'RandomForest'
+                        #             dict_req["train_dist_method"] = CENTRALIZED
+                        #             tertiary_query = json.dumps(dict_req)
+                        #             df = DistributionFactory("RND")
+                        #             df.distribute(backend, 
+                        #                     workers.queue, 
+                        #                     [tertiary_query], 
+                        #                     pickled_clf_arr,
+                        #                     method=dict_req["train_dist_method"])
+
+                        #             # This last worker contains the aggregated ML model
+                        #             last_worker = df.last_worker()
+                        #             print("last worker:{}".format(df.last_worker()))
+                        #             str_model_accs = (", ").join(dist_model_accs)
+                        #             print(str_model_accs)
+                        #             print(type(str_model_accs))
+                        #             # TODO: Inform Client so it can just trigger classification if needed
+                        #             reply = [client_addr,
+                        #                     b"TRAIN_RESP_DONE",
+                        #                     encode(last_worker),
+                        #                     time_done,
+                        #                     encode(str_model_accs)]
+                        #             frontend.send_multipart(reply)
+
+                        #             # ~~~~~~~~~~~~~~~ # solely for validation purposes
+                        #             print("Dist aggregated pickles len: {}".format(len(aggregated_pickles)))
+
+                        #             # feat_extd_data = split_aggregated_feature_extracted(aggregated_pickles)
+                        #             # print("Dist aggregated pickle[0] shape: {}".format(feat_extd_data.shape))
+
+                        #             # TODO: MAJOR, need to change flags to have request and response identifier
+                        #             dict_req = {}
+                        #             dict_req["sender"] = decode(client_addr)
+                        #             dict_req["command"] = PPP_CLSFY
+                        #             dict_req["req_time"] = current_seconds_time()
+                        #             dict_req["model"] = 'RandomForest'
+                        #             classify_query = json.dumps(dict_req)
+
+                        #             df = DistributionFactory("RND-CENTRAL")
+                        #             df.distributor.select_worker(workers.queue, last_worker)
+                        #             # df.distributor.select_worker(workers.queue, "Worker-000")
+                        #             df.distribute(backend, 
+                        #                     workers.queue, 
+                        #                     classify_query, #CHANGE
+                        #                     aggregated_pickles,
+                        #                     method=None)
+                        #             aggregated_pickles = []
+                        # END OF COMMENT OUT
                         elif dict_req["train_dist_method"] == CENTRALIZED:
                             zipped_pickled_model = msg[9]
                             aggregated_pickles = []
@@ -585,6 +624,7 @@ def main():
                                     msg[8]]
                             frontend.send_multipart(reply)
 
+                    # TODO: Just receive the rowID and predictionList and tally (get highest votes) maybe it can be stacked into a matrix, and then get axis=1 operation
                     if flag == PPP_CLSFY:
                         message = decode(msg[6])
                         time_finished = decode(msg[7])
@@ -684,6 +724,7 @@ def main():
                 # ~~~~~~~~~ CLASSIFY ONLY ~~~~~~~~~~~~~~ #
                 # TODO: Must add which 'acc' or 'gyro' is needed...
                 # Hard coded worker - since im lazy (for now) centralized ML classification
+                # This part is done by the Generators_and_Iterators.ipynb, not by test_client.py
                 if json_req['command'] == PPP_CLSFY:
                     print("Received some classification task...")
                     pickled_chunk = query[2:]

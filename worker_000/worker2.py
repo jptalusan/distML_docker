@@ -162,6 +162,9 @@ class TrainingFactory(object):
     def zipped_pickle_model(self):
         return zip_and_pickle(self.trainer.model())
 
+    def model(self):
+        return self.trainer.model()
+
 class RandomForest(object):
     def train(self, numpy_arr):
         print("RandomForest()")
@@ -299,7 +302,12 @@ class Worker(object):
                     # TODO: Should I clear this each time? a new message arrives?
                     tf = TrainingFactory("RF")
                     tf.train(np_output)
-                    
+
+                    # TODO: Use this model to classify and get the classifications of each DT
+                    model_name = "{}-RF-model.joblib".format(decode(self.identity))
+                    dump(tf.model, model_name)
+
+                    # TODO: Change this for DISTRIBUTED DT so model does not need to be distributed, we can skip the aggregate models
                     socket.send_multipart([PPP_TASKS,
                                         PPP_CAPAB_PI,
                                         PPP_FREE,
@@ -309,7 +317,9 @@ class Worker(object):
                                         encode(str(current_seconds_time())),
                                         encode(str(tf.accuracy())),
                                         tf.zipped_pickle_model()])
+
                 # TODO: This is specifically for distributedly trained RF!
+                # TODO: Change or adapt this to just get the data
                 elif command == "AGGREGATE_MODELS":
                     print(json_req['command'])
                     pickle_arr = message_from_router[1:]
@@ -330,6 +340,7 @@ class Worker(object):
                     print("Combined Clf:{}".format(combined_rf_model))
                     pass
 
+                # TODO: Change this, still receive the pickled n_arr but classify only on own model and return tree
                 elif command == PPP_CLSFY:
                     print("Got something from here...")
                     pickle_arr = message_from_router[1:]
@@ -371,6 +382,16 @@ class Worker(object):
                     # ~~~~~~~~~~~~~~~# END
                     pass
 
+                # TODO: Compare the bytes transferred when aggregating (Sending models around)
+                # compared to just sending the votes of the decision trees and then tallying it.
+            
+                # We can train and classify by sending the trees to each other
+                # But we can also retain the models for each (save it to worker_0000.joblib or something)
+                # When a classification task arrives, all available nodes with the model, runs it
+                # Sends back an array results by the decision trees
+                # A single node aggregates and tallies everything
+                # All the while measuring the communication overhead
+                
                 elif command == "EXTRACT-CLASSIFY":
                     print("EXTRACT-CLASSIFY TASK received!")
                     pickled_arr = message_from_router[1:]
