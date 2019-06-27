@@ -441,11 +441,11 @@ def main():
                                     
                                     # TODO: The split should be prepared by request or algorithm
                                     # number_of_trainers = len(workers.queue)
-                                    number_of_trainers = 6
+                                    number_of_trainers = 3 #HARDCODED
 
                                     n_arr = list(split(n_, number_of_trainers))
             
-                                    # checking if it was randomized
+                                    # checking if it was randomized (sanity check)
                                     if np.equal(n_[0:50], n_arr[0][0:50]).all():
                                         print("Equal")
                                     else:
@@ -456,7 +456,7 @@ def main():
                                     secondary_queries = [x for item in secondary_queries for x in repeat(item, len(split_pickles_arr))]
                                     # TODO: duplicate parsed_query... same as length of n_arr
 
-                                    if __debug__:
+                                    if __debug__ == 1:
                                         print("Len of split pickles arr: {}".format(len(split_pickles_arr)))
                                         print("Len of secondary_queries: {}".format(len(secondary_queries)))
                                         
@@ -495,6 +495,7 @@ def main():
                         if dict_req["train_dist_method"] == DISTRIBUTED:
                             training_tasks_processed_by_worker += 1
                             # model_accuracy = msg[8]
+                            # Tasks are not yet finished, so continue sending...
                             if secondary_queries:
                                 df = DistributionFactory("RND")
                                 df.distribute(backend,
@@ -502,6 +503,8 @@ def main():
                                               secondary_queries,
                                               split_pickles_arr,
                                               method=dict_req["train_dist_method"])
+
+                            # Tasks are all finished, continue with classification...
                             else:
                                 if training_tasks_processed_by_worker == number_of_trainers:
                                     # TODO: Must pass some rowID so i have an idea when it returns which is which
@@ -511,18 +514,15 @@ def main():
                                     dict_req["req_time"] = current_seconds_time()
                                     dict_req["model"] = 'RandomForest'
                                     classify_query = json.dumps(dict_req)
+                                    
+                                    df = DistributionFactory("RND")
+                                    # Check how many workers are now available (they should all be)
+                                    for worker in workers.queue:
+                                        message = [encode(worker), 
+                                                   encode(classify_query)]
+                                        message.extend(aggregated_pickles)
+                                        backend.send_multipart(message)
 
-                                    df = DistributionFactory("RND-CENTRAL")
-                                    df.distributor.select_worker(workers.queue, last_worker)
-                                    # df.distributor.select_worker(workers.queue, "Worker-000")
-                                    df.distribute(backend, 
-                                            workers.queue, 
-                                            classify_query, #CHANGE
-                                            aggregated_pickles,
-                                            method=None)
-                                    aggregated_pickles = []
-
-                                    pass
 
                         # END OF IDEA
 
@@ -644,7 +644,7 @@ def main():
                         frontend.send_multipart(reply)
 
                         # TODO4: Just resending a heartbeat for debugging/testing/experiment
-                        for kk in range(24):
+                        for kk in range(24): #HARDCODED
                             worker_name = "Worker_" + "{}".format(kk).zfill(4)
                             print("Sending a heartbeat to {}".format(worker_name))
                             msg = [encode(worker_name), PPP_HEARTBEAT]
@@ -739,7 +739,7 @@ def main():
                     
                     print("Classify query: {}".format(classify_query))
                     # TODO: When no workers are available, either queue incoming data (which might be too much)
-                    # or drop it, then measured the percentages of dropped vs success/sent
+                    # or drop it, then measured the percentages of dropped vs success/sent (vs increasing number of workers)
                     if len(workers.queue) > 0:
                         df = DistributionFactory("RND-CENTRAL")
                         df.distributor.select_worker(workers.queue, worker_address=None)

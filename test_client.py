@@ -28,6 +28,7 @@ def unpickle_and_unzip(pickled):
     return unpickld
     
 def client_thread(client_url, i, rows, run, workers):
+    print("Rows: {}, Run: {}, Workers: {}\n".format(rows, run, workers))
     """ Basic request-reply client using REQ socket """
     context = zmq.Context.instance()
     socket = context.socket(zmq.DEALER)

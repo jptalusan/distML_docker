@@ -280,6 +280,8 @@ class Worker(object):
                         # print("WR: done working...")
 
                         # print("After sending:", psutil.cpu_percent(interval=None, percpu=False))
+                        # TODO: We should not have to send this back to broker for churning, in the
+                        # future we should just get our own data and train on that...
                         print("After sending:", psutil.cpu_percent(interval=None, percpu=True))
                         socket.send_multipart([PPP_TASKS,
                                             PPP_CAPAB_PI,
@@ -290,7 +292,9 @@ class Worker(object):
                                             b"Some other data...",
                                             zipped])
                     else:
+                        # TODO: I should still return something so the heartbeat is OK
                         print("Failed feature extraction. Chunk too small (<128)")
+                        
                 elif command == PPP_TRAIN:
                     print(json_req['command'])
                     pickle_arr = message_from_router[1:]
@@ -300,12 +304,25 @@ class Worker(object):
                     print(np_output.shape)
 
                     # TODO: Should I clear this each time? a new message arrives?
-                    tf = TrainingFactory("RF")
-                    tf.train(np_output)
+                    # tf = TrainingFactory("RF")
+                    # tf.train(np_output)
 
+                    # DEBUG
+
+                    X = np_output[:,:-1]
+                    y = np_output[:,-1:]
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=100)
+                    clf = RandomForestClassifier(n_estimators=20, random_state=100)  
+                    clf.fit(X_train, y_train.ravel())
+                    y_pred = clf.predict(X_test)   
+                    acc = accuracy_score(y_test, y_pred)
+                    # END DEBUG
                     # TODO: Use this model to classify and get the classifications of each DT
                     model_name = "{}-RF-model.joblib".format(decode(self.identity))
-                    dump(tf.model, model_name)
+                    dump(clf, model_name)
+
+                    print(clf)
+                    
 
                     # TODO: Change this for DISTRIBUTED DT so model does not need to be distributed, we can skip the aggregate models
                     socket.send_multipart([PPP_TASKS,
@@ -315,8 +332,8 @@ class Worker(object):
                                         encode(client_addr),
                                         b"Im done with TRAINING...",
                                         encode(str(current_seconds_time())),
-                                        encode(str(tf.accuracy())),
-                                        tf.zipped_pickle_model()])
+                                        encode(str(acc)), #encode(str(tf.accuracy())),
+                                        zip_and_pickle(clf)]) # tf.zipped_pickle_model()])
 
                 # TODO: This is specifically for distributedly trained RF!
                 # TODO: Change or adapt this to just get the data
@@ -342,44 +359,75 @@ class Worker(object):
 
                 # TODO: Change this, still receive the pickled n_arr but classify only on own model and return tree
                 elif command == PPP_CLSFY:
-                    print("Got something from here...")
+                    print("Got {} task from broker.".format(command))
                     pickle_arr = message_from_router[1:]
                     np_output = split_aggregated_feature_extracted(pickle_arr)
                     print("Pickle array for validation...", np_output.shape)
 
-                    # ~~~~~~~~~~~~~~# DEBUGGING
                     X = np_output[:,:-1]
                     y = np_output[:,-1:]
 
                     X_train, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=100)
 
+                    # ~~~~~~~~~~~~~~# OLD
+                    model_name = "{}-RF-model.joblib".format(decode(self.identity))
+                    clf = load(model_name)
+                    
+                    # clf = pickle.load(open(model_name, 'rb'))
 
-                    # TODO: It fails without this, how do I do machine learning?!
-                    # sc = StandardScaler()
-                    # X_train = sc.fit_transform(X_train)
-                    # X_test = sc.transform(X_test)
+                    print(clf)
+                    print(type(clf))
+                    print(sklearn.__version__)
+                    print(len(clf.estimators_))
+                    total_trees_pred = []
+                    for ii, t in enumerate(X_test):
+                        trees_pred = []
+                        for tree in clf.estimators_:
+                            trees_pred.append(tree.predict([t])[0])
 
-                    clf = load('combined_rf_model.joblib') 
-                    y_pred = clf.predict(X_test)
+                        trees_pred_np = np.asarray(trees_pred)
+                        unique, counts = np.unique(trees_pred_np, return_counts=True)
+                        print("Forest {}: Tree predictions:{}".format(ii, dict(zip(unique, counts))))
 
-                    print(confusion_matrix(y_test, y_pred))
-                    print(classification_report(y_test, y_pred))
-                    acc = accuracy_score(y_test, y_pred)
-                    print("accuracy:{}".format(acc))
-                    print("final CLF: {}".format(clf))
+                        total_trees_pred.append(max(set(trees_pred), key=trees_pred.count))
 
-                    pickled_y_pred = zip_and_pickle(y_pred)
+                    print(total_trees_pred)
 
-                    socket.send_multipart([PPP_TASKS,
-                                           PPP_CAPAB_PI,
-                                           PPP_FREE,
-                                           encode(PPP_CLSFY),
-                                           encode(client_addr),
-                                           b"Im done with Classifying...",
-                                           encode(str(current_seconds_time())),
-                                           encode(str(acc)),
-                                           pickled_y_pred])
-                    # ~~~~~~~~~~~~~~~# END
+                    # ~~~~~~~~~~~~~~# END NEW
+
+                    # ~~~~~~~~~~~~~~# OLD
+                    # X = np_output[:,:-1]
+                    # y = np_output[:,-1:]
+
+                    # X_train, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=100)
+
+
+                    # # TODO: It fails without this, how do I do machine learning?!
+                    # # sc = StandardScaler()
+                    # # X_train = sc.fit_transform(X_train)
+                    # # X_test = sc.transform(X_test)
+
+                    # clf = load('combined_rf_model.joblib') 
+                    # y_pred = clf.predict(X_test)
+
+                    # print(confusion_matrix(y_test, y_pred))
+                    # print(classification_report(y_test, y_pred))
+                    # acc = accuracy_score(y_test, y_pred)
+                    # print("accuracy:{}".format(acc))
+                    # print("final CLF: {}".format(clf))
+
+                    # pickled_y_pred = zip_and_pickle(y_pred)
+
+                    # socket.send_multipart([PPP_TASKS,
+                    #                        PPP_CAPAB_PI,
+                    #                        PPP_FREE,
+                    #                        encode(PPP_CLSFY),
+                    #                        encode(client_addr),
+                    #                        b"Im done with Classifying...",
+                    #                        encode(str(current_seconds_time())),
+                    #                        encode(str(acc)),
+                    #                        pickled_y_pred])
+                    # ~~~~~~~~~~~~~~~# END OLD
                     pass
 
                 # TODO: Compare the bytes transferred when aggregating (Sending models around)
